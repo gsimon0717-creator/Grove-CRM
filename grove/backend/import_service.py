@@ -1,13 +1,39 @@
 import csv
 import logging
+import os
 from datetime import datetime
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
+
+from google.cloud import firestore
+from google.oauth2 import service_account
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def import_contacts_from_csv(csv_file_path: str, firestore_ref) -> Dict[str, Any]:
+def initialize_firestore_client(service_account_path: str) -> Optional[firestore.Client]:
+    """
+    Initializes a Firestore client using a service account key file.
+    
+    Args:
+        service_account_path: Path to the service account JSON key file.
+        
+    Returns:
+        An initialized google.cloud.firestore.Client object, or None if an error occurs.
+    """
+    try:
+        if not os.path.exists(service_account_path):
+            logger.error(f"Service account key file not found at: {service_account_path}")
+            return None
+            
+        credentials = service_account.Credentials.from_service_account_file(service_account_path)
+        client = firestore.Client(credentials=credentials)
+        return client
+    except Exception as e:
+        logger.error(f"Failed to initialize Firestore client: {str(e)}")
+        return None
+
+def import_contacts_from_csv(csv_file_path: str, firestore_ref: firestore.Client) -> Dict[str, Any]:
     """
     Imports contact data from a CSV file into Google Firestore.
     
@@ -91,32 +117,45 @@ def import_contacts_from_csv(csv_file_path: str, firestore_ref) -> Dict[str, Any
     return summary
 
 if __name__ == "__main__":
-    # Example usage (for demonstration)
-    import os
-    from google.cloud import firestore
-    from google.oauth2 import service_account
-
     # Path to service account key
     KEY_PATH = "grove/backend/serviceAccountKey.json"
     
-    if os.path.exists(KEY_PATH):
-        credentials = service_account.Credentials.from_service_account_file(KEY_PATH)
-        db = firestore.Client(credentials=credentials)
+    # Path to CSV file
+    CSV_PATH = "dummy_contacts.csv"
+    
+    # 1. Programmatically create a dummy CSV file for demonstration
+    logger.info(f"Creating dummy CSV file: {CSV_PATH}")
+    csv_headers = ["Contact Id", "First Name", "Last Name", "Phone", "Email", "Business Name", "Created", "Last Activity", "Tags"]
+    csv_rows = [
+        # Standard row with tags
+        ["CID-001", "John", "Doe", "555-0101", "john@example.com", "Doe Corp", "2023-01-15T10:00:00Z", "2023-10-01T14:30:00Z", "prospect, tech"],
+        # Row with missing data (First Name/Last Name empty)
+        ["CID-002", "", "", "555-0102", "jane@example.com", "Jane's Shop", "2023-02-20T09:00:00Z", "", "retail"],
+        # Row with date parsing challenges (non-ISO format)
+        ["CID-003", "Bob", "Smith", "555-0103", "bob@example.com", "Smith & Co", "Oct 12, 2023", "2023-11-05", "vip"],
+        # Row with missing Contact Id (should fail)
+        ["", "Error", "Row", "", "error@example.com", "", "", "", ""]
+    ]
+    
+    with open(CSV_PATH, mode='w', encoding='utf-8', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(csv_headers)
+        writer.writerows(csv_rows)
+
+    # 2. Initialize Firestore client
+    db = initialize_firestore_client(KEY_PATH)
+    
+    if db:
+        # 3. Import contacts
+        results = import_contacts_from_csv(CSV_PATH, db)
         
-        # Path to CSV file
-        CSV_PATH = "contacts_to_import.csv"
-        
-        if os.path.exists(CSV_PATH):
-            results = import_contacts_from_csv(CSV_PATH, db)
-            print("\nImport Summary:")
-            print(f"Total Processed: {results['total_processed']}")
-            print(f"Successful: {results['successful_imports']}")
-            print(f"Failed: {results['failed_imports']}")
-            if results['errors']:
-                print("\nErrors:")
-                for err in results['errors']:
-                    print(f"- {err}")
-        else:
-            print(f"CSV file not found at {CSV_PATH}")
+        print("\nImport Summary:")
+        print(f"Total Processed: {results['total_processed']}")
+        print(f"Successful: {results['successful_imports']}")
+        print(f"Failed: {results['failed_imports']}")
+        if results['errors']:
+            print("\nErrors:")
+            for err in results['errors']:
+                print(f"- {err}")
     else:
-        print(f"Service account key not found at {KEY_PATH}")
+        print(f"\nCould not initialize Firestore client. Please ensure '{KEY_PATH}' exists and is valid.")
