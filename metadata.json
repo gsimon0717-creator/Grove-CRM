@@ -1,0 +1,5 @@
+{
+  "name": "Grove CRM",
+  "description": "A professional enterprise-grade CRM for managing leads, contacts, deals, and tasks with a built-in API for agent automation.",
+  "requestFramePermissions": []
+}

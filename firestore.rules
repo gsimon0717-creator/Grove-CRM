@@ -1,0 +1,188 @@
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: users
+// Document ID: {userId}
+// Fields:
+//   - uid: string (required)
+//   - email: string (required, email format)
+//   - displayName: string (optional)
+//   - role: string (required, ['admin', 'agent', 'user'])
+//   - createdAt: timestamp (optional)
+//
+// Collection: leads
+// Document ID: {leadId}
+// Fields:
+//   - name: string (required)
+//   - email: string (optional)
+//   - phone: string (optional)
+//   - company: string (optional)
+//   - status: string (required, ['new', 'contacted', 'qualified', 'lost'])
+//   - source: string (optional)
+//   - assignedTo: string (optional)
+//   - createdAt: timestamp (optional)
+//   - updatedAt: timestamp (optional)
+//
+// Collection: contacts
+// Document ID: {contactId}
+// Fields:
+//   - firstName: string (required)
+//   - lastName: string (required)
+//   - email: string (required)
+//   - phone: string (optional)
+//   - company: string (optional)
+//   - jobTitle: string (optional)
+//   - createdAt: timestamp (optional)
+//
+// Collection: deals
+// Document ID: {dealId}
+// Fields:
+//   - title: string (required)
+//   - value: number (required)
+//   - stage: string (required, ['discovery', 'proposal', 'negotiation', 'closed-won', 'closed-lost'])
+//   - contactId: string (optional)
+//   - expectedCloseDate: timestamp (optional)
+//   - assignedTo: string (optional)
+//   - createdAt: timestamp (optional)
+//
+// Collection: tasks
+// Document ID: {taskId}
+// Fields:
+//   - title: string (required)
+//   - description: string (optional)
+//   - dueDate: timestamp (optional)
+//   - status: string (required, ['todo', 'in-progress', 'done'])
+//   - priority: string (required, ['low', 'medium', 'high'])
+//   - assignedTo: string (optional)
+//   - relatedTo: string (optional)
+//   - createdAt: timestamp (optional)
+//
+// ===============================================================
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (request.auth.token.email == "gsimon0717@gmail.com" || 
+         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'));
+    }
+
+    function isAgent() {
+      return isAuthenticated() && 
+        (isAdmin() || 
+         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'agent'));
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.size() >= 3 && email.matches(".*@.*");
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return hasRequiredFields(['uid', 'email', 'role']) &&
+             data.uid == request.auth.uid &&
+             isValidEmail(data.email) &&
+             data.role in ['admin', 'agent', 'user'];
+    }
+
+    function isValidLead(data) {
+      return hasRequiredFields(['name', 'status']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.status in ['new', 'contacted', 'qualified', 'lost'] &&
+             (!('email' in data) || isValidEmail(data.email));
+    }
+
+    function isValidContact(data) {
+      return hasRequiredFields(['firstName', 'lastName', 'email1']) &&
+             data.firstName is string && 
+             data.lastName is string && 
+             isValidEmail(data.email1);
+    }
+
+    function isValidDeal(data) {
+      return hasRequiredFields(['title', 'value', 'stage']) &&
+             data.title is string && data.title.size() > 0 &&
+             data.value is number && data.value >= 0 &&
+             data.stage in ['discovery', 'proposal', 'negotiation', 'closed-won', 'closed-lost'];
+    }
+
+    function isValidTask(data) {
+      return hasRequiredFields(['title', 'status', 'priority']) &&
+             data.title is string && data.title.size() > 0 &&
+             data.status in ['todo', 'in-progress', 'done'] &&
+             data.priority in ['low', 'medium', 'high'];
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /test_write/{id} {
+      allow write: if isAuthenticated();
+    }
+
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (isOwner(userId) || isAgent());
+      allow create: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data) && 
+                    (request.resource.data.role == 'user' || isAdmin());
+      allow update: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data) &&
+                    (request.resource.data.role == resource.data.role || isAdmin());
+    }
+
+    match /leads/{leadId} {
+      allow read: if isAgent();
+      allow create: if isAgent() && isValidLead(request.resource.data);
+      allow update: if isAgent() && isValidLead(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /contacts/{contactId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidContact(request.resource.data);
+      allow update: if isAuthenticated() && isValidContact(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /deals/{dealId} {
+      allow read: if isAgent();
+      allow create: if isAgent() && isValidDeal(request.resource.data);
+      allow update: if isAgent() && isValidDeal(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /tasks/{taskId} {
+      allow read: if isAgent();
+      allow create: if isAgent() && isValidTask(request.resource.data);
+      allow update: if isAgent() && isValidTask(request.resource.data);
+      allow delete: if isAdmin();
+    }
+  }
+}

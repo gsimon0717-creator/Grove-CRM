@@ -1,0 +1,105 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "CRM user profile",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "agent", "user"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "Lead": {
+      "title": "Lead",
+      "description": "Potential customer",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "phone": { "type": "string" },
+        "company": { "type": "string" },
+        "status": { "type": "string", "enum": ["new", "contacted", "qualified", "lost"] },
+        "source": { "type": "string" },
+        "assignedTo": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "status"]
+    },
+    "Contact": {
+      "title": "Contact",
+      "description": "Individual customer or prospect",
+      "type": "object",
+      "properties": {
+        "firstName": { "type": "string" },
+        "lastName": { "type": "string" },
+        "email1": { "type": "string", "format": "email" },
+        "email2": { "type": "string", "format": "email" },
+        "phone1": { "type": "string" },
+        "phone2": { "type": "string" },
+        "companyName": { "type": "string" },
+        "jobDescription": { "type": "string" },
+        "tag": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["firstName", "lastName", "email1"]
+    },
+    "Deal": {
+      "title": "Deal",
+      "description": "Sales opportunity",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "value": { "type": "number" },
+        "stage": { "type": "string", "enum": ["discovery", "proposal", "negotiation", "closed-won", "closed-lost"] },
+        "contactId": { "type": "string" },
+        "expectedCloseDate": { "type": "string", "format": "date" },
+        "assignedTo": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "value", "stage"]
+    },
+    "Task": {
+      "title": "Task",
+      "description": "Action item",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "dueDate": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["todo", "in-progress", "done"] },
+        "priority": { "type": "string", "enum": ["low", "medium", "high"] },
+        "assignedTo": { "type": "string" },
+        "relatedTo": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "/leads/{leadId}": {
+      "schema": "Lead",
+      "description": "Sales leads"
+    },
+    "/contacts/{contactId}": {
+      "schema": "Contact",
+      "description": "CRM contacts"
+    },
+    "/deals/{dealId}": {
+      "schema": "Deal",
+      "description": "Sales deals"
+    },
+    "/tasks/{taskId}": {
+      "schema": "Task",
+      "description": "CRM tasks"
+    }
+  }
+}
