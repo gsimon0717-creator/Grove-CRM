@@ -268,9 +268,19 @@ export default function App() {
 
   const handleLogin = async () => {
     try {
-      await signInWithPopup(auth, new GoogleAuthProvider());
-    } catch (error) {
+      const provider = new GoogleAuthProvider();
+      // Force select account to ensure the popup stays open for interaction
+      provider.setCustomParameters({ prompt: 'select_account' });
+      await signInWithPopup(auth, provider);
+    } catch (error: any) {
       console.error("Login failed", error);
+      if (error.code === 'auth/unauthorized-domain') {
+        alert(`Login failed: This domain (${window.location.hostname}) is not authorized in your Firebase project.\n\nPlease add it to the "Authorized domains" list in the Firebase Console (Authentication > Settings > Authorized domains).`);
+      } else if (error.code === 'auth/popup-blocked') {
+        alert("Login failed: The popup was blocked by your browser. Please allow popups for this site and try again.");
+      } else {
+        alert(`Login failed: ${error.message}\nCode: ${error.code}`);
+      }
     }
   };
 
