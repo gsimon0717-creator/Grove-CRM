@@ -2,9 +2,28 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
+import admin from "firebase-admin";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Initialize Firebase Admin
+// This requires FIREBASE_SERVICE_ACCOUNT in environment variables
+if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+  try {
+    const serviceAccount = JSON.parse(
+      process.env.FIREBASE_SERVICE_ACCOUNT.startsWith('{') 
+        ? process.env.FIREBASE_SERVICE_ACCOUNT 
+        : Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT, 'base64').toString()
+    );
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount)
+    });
+    console.log("Firebase Admin initialized successfully");
+  } catch (error) {
+    console.error("Failed to initialize Firebase Admin:", error);
+  }
+}
 
 async function startServer() {
   const app = express();
@@ -12,19 +31,61 @@ async function startServer() {
 
   app.use(express.json());
 
+  // Middleware to check API Key
+  const authenticateAgent = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const apiKey = req.headers['x-api-key'];
+    const validKey = process.env.GROVE_API_KEY;
+
+    if (!validKey) {
+      return res.status(500).json({ error: "API access not configured. Set GROVE_API_KEY in secrets." });
+    }
+
+    if (apiKey !== validKey) {
+      return res.status(401).json({ error: "Invalid API Key" });
+    }
+    next();
+  };
+
   // API Routes for Agent Access
-  // In a real app, we'd use Firebase Admin SDK here for full access
-  // For this demo, we'll provide endpoints that could be used by an agent
-  
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok", service: "Grove CRM API" });
   });
 
-  // Example API endpoints for the agent
-  // Note: These would typically require an API key or Admin token
-  app.get("/api/v1/leads", (req, res) => {
-    // Agent would call this to get leads
-    res.json({ message: "Agent API: Leads endpoint. Use Firebase Client SDK for real-time data or implement Admin SDK here." });
+  // Get all leads
+  app.get("/api/v1/leads", authenticateAgent, async (req, res) => {
+    try {
+      const snapshot = await admin.firestore().collection('leads').get();
+      const leads = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      res.json(leads);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Get all contacts
+  app.get("/api/v1/contacts", authenticateAgent, async (req, res) => {
+    try {
+      const snapshot = await admin.firestore().collection('contacts').get();
+      const contacts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      res.json(contacts);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Create a new lead
+  app.post("/api/v1/leads", authenticateAgent, async (req, res) => {
+    try {
+      const leadData = req.body;
+      const docRef = await admin.firestore().collection('leads').add({
+        ...leadData,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+      res.status(201).json({ id: docRef.id, message: "Lead created successfully" });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
   });
 
   // Vite middleware for development
