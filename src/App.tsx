@@ -16,13 +16,16 @@ import {
   Target,
   Clock,
   ChevronRight,
+  ChevronLeft,
   Menu,
   X,
   Bell,
   Edit2,
   Trash2,
+  Database,
   Upload
 } from 'lucide-react';
+import firebaseConfig from '../firebase-applet-config.json';
 import { 
   signInWithPopup, 
   GoogleAuthProvider, 
@@ -41,6 +44,7 @@ import {
   serverTimestamp, 
   getDoc,
   getDocFromServer,
+  getCountFromServer,
   setDoc,
   orderBy,
   limit,
@@ -164,6 +168,9 @@ export default function App() {
   const [deals, setDeals] = useState<Deal[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
+  const [totalContactCount, setTotalContactCount] = useState(0);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 50;
   const [editingContactId, setEditingContactId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -178,7 +185,8 @@ export default function App() {
     phone2: '',
     companyName: '',
     jobDescription: '',
-    tag: ''
+    tag: '',
+    otherInfo: ''
   });
 
   useEffect(() => {
@@ -204,14 +212,31 @@ export default function App() {
     };
     testConnection();
 
+    // Safety timeout for loading state
+    const loadingTimeout = setTimeout(() => {
+      setLoading(current => {
+        if (current) {
+          console.warn('Loading state timed out. Forcing loading to false. This may indicate a Firebase initialization issue.');
+          return false;
+        }
+        return false;
+      });
+    }, 10000); // 10 seconds
+
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
+      console.log('Auth state changed:', u?.uid);
+      clearTimeout(loadingTimeout);
       setUser(u);
-      if (u) {
-        try {
+      
+      try {
+        if (u) {
+          console.log('Fetching user profile for:', u.uid);
           const userDoc = await getDoc(doc(db, 'users', u.uid));
           if (userDoc.exists()) {
+            console.log('Profile found:', userDoc.data());
             setProfile(userDoc.data() as UserProfile);
           } else {
+            console.log('No profile found, creating one...');
             const newProfile: UserProfile = {
               uid: u.uid,
               email: u.email!,
@@ -222,13 +247,21 @@ export default function App() {
             await setDoc(doc(db, 'users', u.uid), newProfile);
             setProfile(newProfile);
           }
-        } catch (error) {
-          handleFirestoreError(error, OperationType.GET, `users/${u.uid}`);
+        } else {
+          setProfile(null);
         }
-      } else {
-        setProfile(null);
+      } catch (error) {
+        console.error('Profile fetch/create failed:', error);
+        // We don't throw here to avoid skipping setLoading(false)
+        try {
+          handleFirestoreError(error, OperationType.GET, u ? `users/${u.uid}` : 'users/null');
+        } catch (e) {
+          // Ignore the throw from handleFirestoreError to continue logic
+        }
+      } finally {
+        setLoading(false);
+        console.log('Loading state set to false');
       }
-      setLoading(false);
     });
     return () => unsubscribe();
   }, []);
@@ -237,32 +270,120 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
 
-    const qLeads = query(collection(db, 'leads'), limit(50));
+    const qLeads = query(collection(db, 'leads'), limit(100));
     const unsubLeads = onSnapshot(qLeads, (snapshot) => {
-      setLeads(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Lead)));
+      setLeads(snapshot.docs.map(d => {
+        const data = d.data();
+        return {
+          id: d.id,
+          name: data.name || '',
+          email: data.email || '',
+          phone: data.phone || '',
+          company: data.company || data.company_name || '',
+          status: data.status || 'new',
+          source: data.source || '',
+          assignedTo: data.assignedTo || '',
+          createdAt: data.createdAt || data.created_at || null,
+          updatedAt: data.updatedAt || data.updated_at || null
+        } as Lead;
+      }));
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'leads'));
 
-    const qDeals = query(collection(db, 'deals'), limit(50));
+    const qDeals = query(collection(db, 'deals'), limit(100));
     const unsubDeals = onSnapshot(qDeals, (snapshot) => {
-      setDeals(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Deal)));
+      setDeals(snapshot.docs.map(d => {
+        const data = d.data();
+        return {
+          id: d.id,
+          title: data.title || '',
+          value: data.value || 0,
+          stage: data.stage || 'discovery',
+          contactId: data.contactId || '',
+          expectedCloseDate: data.expectedCloseDate || null,
+          assignedTo: data.assignedTo || '',
+          createdAt: data.createdAt || data.created_at || null
+        } as Deal;
+      }));
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'deals'));
 
-    const qTasks = query(collection(db, 'tasks'), limit(50));
+    const qTasks = query(collection(db, 'tasks'), limit(100));
     const unsubTasks = onSnapshot(qTasks, (snapshot) => {
-      setTasks(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Task)));
+      setTasks(snapshot.docs.map(d => {
+        const data = d.data();
+        return {
+          id: d.id,
+          title: data.title || '',
+          description: data.description || '',
+          dueDate: data.dueDate || data.due_date || null,
+          status: data.status || 'todo',
+          priority: data.priority || 'medium',
+          assignedTo: data.assignedTo || '',
+          relatedTo: data.relatedTo || '',
+          createdAt: data.createdAt || data.created_at || null
+        } as Task;
+      }));
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'tasks'));
 
-    const qContacts = query(collection(db, 'contacts'), limit(50));
-    const unsubContacts = onSnapshot(qContacts, (snapshot) => {
-      console.log('Received contacts update:', snapshot.docs.length, 'documents');
-      setContacts(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Contact)));
-    }, (error) => handleFirestoreError(error, OperationType.LIST, 'contacts'));
+    const fetchContacts = async () => {
+      const collectionsToTry = ['contacts', 'Contacts', 'people'];
+      const unsubscribes: (() => void)[] = [];
 
+      // Fetch accurate total count across all collections
+      for (const collName of collectionsToTry) {
+        getCountFromServer(collection(db, collName)).then(snap => {
+          const count = snap.data().count;
+          if (count > 0) {
+            setTotalContactCount(prev => prev + count);
+          }
+        }).catch(err => console.warn(`Count failed for ${collName}:`, err));
+      }
+
+      collectionsToTry.forEach(collName => {
+        const q = query(collection(db, collName), limit(1000)); // Increased limit to 1000 for better view depth
+        const unsub = onSnapshot(q, (snapshot) => {
+          if (snapshot.empty) return;
+          console.log(`Found data in collection [${collName}]:`, snapshot.docs.length, 'docs');
+          
+          setContacts(prev => {
+            const newContacts = snapshot.docs.map(d => {
+              const data = d.data();
+              return {
+                id: d.id,
+                firstName: data.firstName || data.first_name || data.First_Name || data.name || '',
+                lastName: data.lastName || data.last_name || data.Last_Name || '',
+                email1: data.email1 || data.email || data.Email || '',
+                email2: data.email2 || '',
+                phone1: data.phone1 || data.phone || data.Phone || '',
+                phone2: data.phone2 || '',
+                companyName: data.companyName || data.company_name || data.Business_Name || '',
+                jobDescription: data.jobDescription || '',
+                tag: data.tag || (data.tags ? (Array.isArray(data.tags) ? data.tags.join(', ') : data.tags) : ''),
+                otherInfo: data.otherInfo || data.Notes || data.comments || '',
+                createdAt: data.createdAt || data.created_at || null
+              } as Contact;
+            });
+
+            // Merge by ID to avoid duplicates if same data exists in multiple spots or on updates
+            const map = new Map(prev.map(c => [c.id, c]));
+            newContacts.forEach(c => map.set(c.id, c));
+            return Array.from(map.values());
+          });
+        }, (error) => {
+          console.warn(`Snapshot failed for [${collName}]:`, error.message);
+        });
+        unsubscribes.push(unsub);
+      });
+
+      return () => unsubscribes.forEach(u => u());
+    };
+
+    const contactsUnsubscribePromise = fetchContacts();
+    
     return () => {
       unsubLeads();
       unsubDeals();
       unsubTasks();
-      unsubContacts();
+      contactsUnsubscribePromise.then(u => u());
     };
   }, [user]);
 
@@ -296,7 +417,8 @@ export default function App() {
       phone2: contact.phone2 || '',
       companyName: contact.companyName || '',
       jobDescription: contact.jobDescription || '',
-      tag: contact.tag || ''
+      tag: contact.tag || '',
+      otherInfo: contact.otherInfo || ''
     });
     setEditingContactId(contact.id || null);
     setShowContactModal(true);
@@ -337,6 +459,7 @@ export default function App() {
             companyName: row.companyName || row.CompanyName || row.company || row.Company || '',
             jobDescription: row.jobDescription || row.JobDescription || row.job || row.Job || '',
             tag: row.tag || row.Tag || 'bulk-upload',
+            otherInfo: row.otherInfo || row.OtherInfo || row.Notes || '',
             createdAt: serverTimestamp()
           };
 
@@ -486,6 +609,23 @@ export default function App() {
               <LogOut size={18} />
               <span>Sign Out</span>
             </button>
+
+            {/* Database Status Indicator */}
+            <div className="mt-4 px-4 py-3 bg-slate-50 border border-slate-200 rounded-lg">
+              <div className="flex items-center gap-2 mb-1.5">
+                <Database size={12} className="text-slate-400" />
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Storage Engine</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-mono text-slate-700 truncate max-w-[120px]">
+                  {firebaseConfig.firestoreDatabaseId || '(default)'}
+                </span>
+                <div className="flex h-1.5 w-1.5 relative">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </aside>
@@ -501,7 +641,29 @@ export default function App() {
             >
               {isSidebarOpen ? <X size={20} /> : <Menu size={20} />}
             </button>
-            <h2 className="text-lg font-bold capitalize">{activeTab}</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-bold capitalize">{activeTab}</h2>
+              {activeTab === 'contacts' && (totalContactCount > 0 || contacts.length > 0) && (
+                <span className="px-2 py-0.5 text-[10px] font-bold bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-full font-mono shadow-sm">
+                  {(totalContactCount || contacts.length).toLocaleString()}
+                </span>
+              )}
+              {activeTab === 'leads' && leads.length > 0 && (
+                <span className="px-2 py-0.5 text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200 rounded-full font-mono shadow-sm">
+                  {leads.length.toLocaleString()}
+                </span>
+              )}
+              {activeTab === 'deals' && deals.length > 0 && (
+                <span className="px-2 py-0.5 text-[10px] font-bold bg-amber-100 text-amber-700 border border-amber-200 rounded-full font-mono shadow-sm">
+                  {deals.length.toLocaleString()}
+                </span>
+              )}
+              {activeTab === 'tasks' && tasks.length > 0 && (
+                <span className="px-2 py-0.5 text-[10px] font-bold bg-rose-100 text-rose-700 border border-rose-200 rounded-full font-mono shadow-sm">
+                  {tasks.length.toLocaleString()}
+                </span>
+              )}
+            </div>
           </div>
           
           <div className="flex items-center gap-3">
@@ -744,70 +906,132 @@ export default function App() {
           )}
 
           {activeTab === 'contacts' && (
-            <Card>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="bg-slate-50 border-b border-slate-200">
-                      <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">Contact</th>
-                      <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">Emails</th>
-                      <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">Phones</th>
-                      <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">Company</th>
-                      <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">Tag</th>
-                      <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {contacts.length > 0 ? contacts.map((contact) => (
-                      <tr key={contact.id} className="hover:bg-slate-50 transition-colors group">
-                        <td className="px-6 py-4">
-                          <div className="font-semibold">{contact.firstName} {contact.lastName}</div>
-                          <div className="text-xs text-slate-500">{contact.jobDescription || '-'}</div>
-                        </td>
-                        <td className="px-6 py-4 text-sm text-slate-600">
-                          <div>{contact.email1}</div>
-                          {contact.email2 && <div className="text-xs text-slate-400">{contact.email2}</div>}
-                        </td>
-                        <td className="px-6 py-4 text-sm text-slate-600">
-                          <div>{contact.phone1 || '-'}</div>
-                          {contact.phone2 && <div className="text-xs text-slate-400">{contact.phone2}</div>}
-                        </td>
-                        <td className="px-6 py-4 text-sm text-slate-600">{contact.companyName || '-'}</td>
-                        <td className="px-6 py-4">
-                          {contact.tag && <Badge variant="info">{contact.tag}</Badge>}
-                        </td>
-                        <td className="px-6 py-4 text-right">
-                          <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button 
-                              onClick={() => handleEditContact(contact)}
-                              className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-md transition-colors"
-                              title="Edit Contact"
-                            >
-                              <Edit2 size={16} />
-                            </button>
-                            {profile?.role === 'admin' && (
+            <div className="space-y-4">
+              <Card>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-200">
+                        <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">First Name</th>
+                        <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">Last Name</th>
+                        <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">Emails</th>
+                        <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">Phones</th>
+                        <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">Company</th>
+                        <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">Other Info</th>
+                        <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">Tag</th>
+                        <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {contacts.length > 0 ? contacts.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((contact) => (
+                        <tr key={contact.id} className="hover:bg-slate-50 transition-colors group">
+                          <td className="px-6 py-4">
+                            <div className="font-semibold text-sm">{contact.firstName}</div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="font-semibold text-sm">{contact.lastName}</div>
+                          </td>
+                          <td className="px-6 py-4 text-sm text-slate-600">
+                            <div>{contact.email1}</div>
+                            {contact.email2 && <div className="text-xs text-slate-400">{contact.email2}</div>}
+                          </td>
+                          <td className="px-6 py-4 text-sm text-slate-600">
+                            <div>{contact.phone1 || '-'}</div>
+                            {contact.phone2 && <div className="text-xs text-slate-400">{contact.phone2}</div>}
+                          </td>
+                          <td className="px-6 py-4 text-sm text-slate-600">
+                            <div>{contact.companyName || '-'}</div>
+                            <div className="text-xs text-slate-400 truncate max-w-[150px]">{contact.jobDescription}</div>
+                          </td>
+                          <td className="px-6 py-4 text-xs text-slate-500 italic max-w-[150px] truncate">
+                            {contact.otherInfo || '-'}
+                          </td>
+                          <td className="px-6 py-4">
+                            {contact.tag && <Badge variant="info">{contact.tag}</Badge>}
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                               <button 
-                                onClick={() => contact.id && handleDeleteContact(contact.id)}
-                                className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors"
-                                title="Delete Contact"
+                                onClick={() => handleEditContact(contact)}
+                                className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-md transition-colors"
+                                title="Edit Contact"
                               >
-                                <Trash2 size={16} />
+                                <Edit2 size={16} />
                               </button>
+                              {profile?.role === 'admin' && (
+                                <button 
+                                  onClick={() => contact.id && handleDeleteContact(contact.id)}
+                                  className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors"
+                                  title="Delete Contact"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )) : (
+                        <tr>
+                          <td colSpan={6} className="px-6 py-12 text-center text-slate-400 italic">
+                            No contacts found. Click "New Contact" to add one.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+
+              {/* Pagination Controls */}
+              {(totalContactCount > itemsPerPage || contacts.length > itemsPerPage) && (
+                <div className="flex items-center justify-between px-2 py-4">
+                  <div className="text-sm text-slate-500 font-medium">
+                    Showing <span className="text-slate-900">{(currentPage - 1) * itemsPerPage + 1}</span> to <span className="text-slate-900">{Math.min(currentPage * itemsPerPage, totalContactCount || contacts.length)}</span> of <span className="text-slate-900">{(totalContactCount || contacts.length).toLocaleString()}</span> contacts
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                      disabled={currentPage === 1}
+                      className="p-2 text-slate-500 hover:bg-white border border-slate-200 rounded-lg disabled:opacity-30 disabled:hover:bg-transparent transition-all"
+                    >
+                      <ChevronLeft size={18} />
+                    </button>
+                    
+                    {/* Page Numbers - Limited view */}
+                    <div className="flex items-center gap-1">
+                      {Array.from({ length: Math.min(5, Math.ceil((totalContactCount || contacts.length) / itemsPerPage)) }, (_, i) => {
+                        const pageNum = i + 1;
+                        return (
+                          <button
+                            key={pageNum}
+                            onClick={() => setCurrentPage(pageNum)}
+                            className={cn(
+                              "w-9 h-9 flex items-center justify-center text-sm font-bold rounded-lg transition-all",
+                              currentPage === pageNum 
+                                ? "bg-emerald-600 text-white shadow-md shadow-emerald-200" 
+                                : "text-slate-600 hover:bg-white border border-transparent hover:border-slate-200"
                             )}
-                          </div>
-                        </td>
-                      </tr>
-                    )) : (
-                      <tr>
-                        <td colSpan={6} className="px-6 py-12 text-center text-slate-400 italic">
-                          No contacts found. Click "New Contact" to add one.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
+                          >
+                            {pageNum}
+                          </button>
+                        );
+                      })}
+                      {Math.ceil((totalContactCount || contacts.length) / itemsPerPage) > 5 && (
+                        <span className="px-2 text-slate-400">...</span>
+                      )}
+                    </div>
+
+                    <button 
+                      onClick={() => setCurrentPage(p => Math.min(Math.ceil((totalContactCount || contacts.length) / itemsPerPage), p + 1))}
+                      disabled={currentPage >= Math.ceil((totalContactCount || contacts.length) / itemsPerPage)}
+                      className="p-2 text-slate-500 hover:bg-white border border-slate-200 rounded-lg disabled:opacity-30 disabled:hover:bg-transparent transition-all"
+                    >
+                      <ChevronRight size={18} />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           )}
 
           {activeTab === 'deals' && (
@@ -911,7 +1135,8 @@ export default function App() {
                     phone2: '',
                     companyName: '',
                     jobDescription: '',
-                    tag: ''
+                    tag: '',
+                    otherInfo: ''
                   });
                 }} 
                 className="p-2 hover:bg-slate-100 rounded-lg text-slate-400"
@@ -1002,6 +1227,15 @@ export default function App() {
                   />
                 </div>
                 <div className="space-y-1 md:col-span-2">
+                  <label className="text-xs font-bold text-slate-500 uppercase">Other Info / Notes</label>
+                  <textarea 
+                    value={newContact.otherInfo}
+                    onChange={(e) => setNewContact({...newContact, otherInfo: e.target.value})}
+                    className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:border-emerald-500 outline-none transition-all min-h-[60px]"
+                    placeholder="Any additional details..."
+                  />
+                </div>
+                <div className="space-y-1 md:col-span-2">
                   <label className="text-xs font-bold text-slate-500 uppercase">Job Description</label>
                   <textarea 
                     value={newContact.jobDescription}
@@ -1026,7 +1260,8 @@ export default function App() {
                     phone2: '',
                     companyName: '',
                     jobDescription: '',
-                    tag: ''
+                    tag: '',
+                    otherInfo: ''
                   });
                 }}
                 className="px-6 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 rounded-lg transition-all"
@@ -1074,7 +1309,8 @@ export default function App() {
                       phone2: '',
                       companyName: '',
                       jobDescription: '',
-                      tag: ''
+                      tag: '',
+                      otherInfo: ''
                     });
                   } catch (error) {
                     handleFirestoreError(error, editingContactId ? OperationType.UPDATE : OperationType.CREATE, 'contacts');

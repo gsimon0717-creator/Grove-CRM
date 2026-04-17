@@ -165,7 +165,7 @@ service cloud.firestore {
     }
 
     match /contacts/{contactId} {
-      allow read: if isAuthenticated();
+      allow read: if true;
       allow create: if isAuthenticated() && isValidContact(request.resource.data);
       allow update: if isAuthenticated() && isValidContact(request.resource.data);
       allow delete: if isAdmin();

@@ -4,11 +4,15 @@ import path from "path";
 import { fileURLToPath } from "url";
 import admin from "firebase-admin";
 
+import fs from "fs";
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Initialize Firebase Admin
-// This requires FIREBASE_SERVICE_ACCOUNT in environment variables
+// This requires FIREBASE_SERVICE_ACCOUNT in environment variables or a key file
+const serviceAccountPath = path.join(process.cwd(), "grove/backend/serviceAccountKey.json");
+
 if (process.env.FIREBASE_SERVICE_ACCOUNT) {
   try {
     const serviceAccount = JSON.parse(
@@ -19,10 +23,22 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT) {
     admin.initializeApp({
       credential: admin.credential.cert(serviceAccount)
     });
-    console.log("Firebase Admin initialized successfully");
+    console.log("Firebase Admin initialized successfully from environment variable.");
   } catch (error) {
-    console.error("Failed to initialize Firebase Admin:", error);
+    console.error("Failed to initialize Firebase Admin from environment variable:", error);
   }
+} else if (fs.existsSync(serviceAccountPath)) {
+  try {
+    const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount)
+    });
+    console.log("Firebase Admin initialized successfully from serviceAccountKey.json.");
+  } catch (error) {
+    console.error("Failed to initialize Firebase Admin from serviceAccountKey.json:", error);
+  }
+} else {
+  console.warn("Firebase Admin NOT initialized. Please set FIREBASE_SERVICE_ACCOUNT or provide grove/backend/serviceAccountKey.json");
 }
 
 async function startServer() {

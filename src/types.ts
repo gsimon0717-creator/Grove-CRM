@@ -32,6 +32,7 @@ export interface Contact {
   companyName?: string;
   jobDescription?: string;
   tag?: string;
+  otherInfo?: string;
   createdAt?: any;
 }
 
