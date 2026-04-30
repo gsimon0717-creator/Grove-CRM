@@ -25,33 +25,7 @@ import {
   Database,
   Upload
 } from 'lucide-react';
-import firebaseConfig from '../firebase-applet-config.json';
-import { 
-  signInWithPopup, 
-  GoogleAuthProvider, 
-  onAuthStateChanged, 
-  signOut,
-  User as FirebaseUser
-} from 'firebase/auth';
-import { 
-  collection, 
-  query, 
-  onSnapshot, 
-  addDoc, 
-  updateDoc, 
-  deleteDoc,
-  doc, 
-  serverTimestamp, 
-  getDoc,
-  getDocFromServer,
-  getCountFromServer,
-  setDoc,
-  orderBy,
-  limit,
-  writeBatch
-} from 'firebase/firestore';
 import Papa from 'papaparse';
-import { auth, db } from './firebase';
 import { Lead, Contact, Deal, Task, UserProfile } from './types';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -59,64 +33,6 @@ import { twMerge } from 'tailwind-merge';
 // --- Utility ---
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
-}
-
-// --- Error Handling ---
-enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
-
-interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId: string | undefined;
-    email: string | null | undefined;
-    emailVerified: boolean | undefined;
-    isAnonymous: boolean | undefined;
-    tenantId: string | null | undefined;
-    providerInfo: {
-      providerId: string;
-      displayName: string | null;
-      email: string | null;
-      photoUrl: string | null;
-    }[];
-  }
-}
-
-function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData.map(provider => ({
-        providerId: provider.providerId,
-        displayName: provider.displayName,
-        email: provider.email,
-        photoUrl: provider.photoURL
-      })) || []
-    },
-    operationType,
-    path
-  }
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  // Display a user-friendly alert for issues
-  if (errInfo.error.includes('insufficient permissions')) {
-    alert("Permission Denied: You don't have the required role to perform this action. If you just signed in, please refresh or wait for your admin role to be assigned.");
-  } else {
-    alert(`Error: ${errInfo.error}`);
-  }
-  throw new Error(JSON.stringify(errInfo));
 }
 
 // --- Components ---
@@ -160,8 +76,19 @@ const Badge = ({ children, variant = 'default' }: { children: React.ReactNode, v
 // --- Main App ---
 
 export default function App() {
-  const [user, setUser] = useState<FirebaseUser | null>(null);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [user, setUser] = useState<any>({
+    uid: 'local-admin',
+    displayName: 'Local Admin',
+    email: 'admin@local.host',
+    photoURL: ''
+  });
+  const [profile, setProfile] = useState<UserProfile | null>({
+    uid: 'local-admin',
+    email: 'admin@local.host',
+    displayName: 'Local Admin',
+    role: 'admin',
+    createdAt: new Date().toISOString()
+  });
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -189,223 +116,40 @@ export default function App() {
     otherInfo: ''
   });
 
-  useEffect(() => {
-    console.log('Profile updated:', profile);
-  }, [profile]);
-
-  // Auth Listener
-  useEffect(() => {
-    // Test Connection
-    const testConnection = async () => {
-      try {
-        console.log("Testing Firestore connection...");
-        await getDocFromServer(doc(db, 'test', 'connection'));
-        console.log("Firestore connection successful.");
-      } catch (error) {
-        if (error instanceof Error && error.message.includes('the client is offline')) {
-          console.error("Please check your Firebase configuration. The client appears to be offline.");
-          alert("Connection Error: The application is unable to connect to Firestore. Please check your internet connection or Firebase configuration.");
-        } else {
-          console.log("Firestore connection test completed (ignoring non-connection errors).");
-        }
-      }
-    };
-    testConnection();
-
-    // Safety timeout for loading state
-    const loadingTimeout = setTimeout(() => {
-      setLoading(current => {
-        if (current) {
-          console.warn('Loading state timed out. Forcing loading to false. This may indicate a Firebase initialization issue.');
-          return false;
-        }
-        return false;
-      });
-    }, 10000); // 10 seconds
-
-    const unsubscribe = onAuthStateChanged(auth, async (u) => {
-      console.log('Auth state changed:', u?.uid);
-      clearTimeout(loadingTimeout);
-      setUser(u);
-      
-      try {
-        if (u) {
-          console.log('Fetching user profile for:', u.uid);
-          const userDoc = await getDoc(doc(db, 'users', u.uid));
-          if (userDoc.exists()) {
-            console.log('Profile found:', userDoc.data());
-            setProfile(userDoc.data() as UserProfile);
-          } else {
-            console.log('No profile found, creating one...');
-            const newProfile: UserProfile = {
-              uid: u.uid,
-              email: u.email!,
-              displayName: u.displayName || '',
-              role: u.email === 'gsimon0717@gmail.com' ? 'admin' : 'user',
-              createdAt: serverTimestamp()
-            };
-            await setDoc(doc(db, 'users', u.uid), newProfile);
-            setProfile(newProfile);
-          }
-        } else {
-          setProfile(null);
-        }
-      } catch (error) {
-        console.error('Profile fetch/create failed:', error);
-        // We don't throw here to avoid skipping setLoading(false)
-        try {
-          handleFirestoreError(error, OperationType.GET, u ? `users/${u.uid}` : 'users/null');
-        } catch (e) {
-          // Ignore the throw from handleFirestoreError to continue logic
-        }
-      } finally {
-        setLoading(false);
-        console.log('Loading state set to false');
-      }
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // Data Listeners
-  useEffect(() => {
-    if (!user) return;
-
-    const qLeads = query(collection(db, 'leads'), limit(100));
-    const unsubLeads = onSnapshot(qLeads, (snapshot) => {
-      setLeads(snapshot.docs.map(d => {
-        const data = d.data();
-        return {
-          id: d.id,
-          name: data.name || '',
-          email: data.email || '',
-          phone: data.phone || '',
-          company: data.company || data.company_name || '',
-          status: data.status || 'new',
-          source: data.source || '',
-          assignedTo: data.assignedTo || '',
-          createdAt: data.createdAt || data.created_at || null,
-          updatedAt: data.updatedAt || data.updated_at || null
-        } as Lead;
-      }));
-    }, (error) => handleFirestoreError(error, OperationType.LIST, 'leads'));
-
-    const qDeals = query(collection(db, 'deals'), limit(100));
-    const unsubDeals = onSnapshot(qDeals, (snapshot) => {
-      setDeals(snapshot.docs.map(d => {
-        const data = d.data();
-        return {
-          id: d.id,
-          title: data.title || '',
-          value: data.value || 0,
-          stage: data.stage || 'discovery',
-          contactId: data.contactId || '',
-          expectedCloseDate: data.expectedCloseDate || null,
-          assignedTo: data.assignedTo || '',
-          createdAt: data.createdAt || data.created_at || null
-        } as Deal;
-      }));
-    }, (error) => handleFirestoreError(error, OperationType.LIST, 'deals'));
-
-    const qTasks = query(collection(db, 'tasks'), limit(100));
-    const unsubTasks = onSnapshot(qTasks, (snapshot) => {
-      setTasks(snapshot.docs.map(d => {
-        const data = d.data();
-        return {
-          id: d.id,
-          title: data.title || '',
-          description: data.description || '',
-          dueDate: data.dueDate || data.due_date || null,
-          status: data.status || 'todo',
-          priority: data.priority || 'medium',
-          assignedTo: data.assignedTo || '',
-          relatedTo: data.relatedTo || '',
-          createdAt: data.createdAt || data.created_at || null
-        } as Task;
-      }));
-    }, (error) => handleFirestoreError(error, OperationType.LIST, 'tasks'));
-
-    const fetchContacts = async () => {
-      const collectionsToTry = ['contacts', 'Contacts', 'people'];
-      const unsubscribes: (() => void)[] = [];
-
-      // Fetch accurate total count across all collections
-      for (const collName of collectionsToTry) {
-        getCountFromServer(collection(db, collName)).then(snap => {
-          const count = snap.data().count;
-          if (count > 0) {
-            setTotalContactCount(prev => prev + count);
-          }
-        }).catch(err => console.warn(`Count failed for ${collName}:`, err));
-      }
-
-      collectionsToTry.forEach(collName => {
-        const q = query(collection(db, collName), limit(1000)); // Increased limit to 1000 for better view depth
-        const unsub = onSnapshot(q, (snapshot) => {
-          if (snapshot.empty) return;
-          console.log(`Found data in collection [${collName}]:`, snapshot.docs.length, 'docs');
-          
-          setContacts(prev => {
-            const newContacts = snapshot.docs.map(d => {
-              const data = d.data();
-              return {
-                id: d.id,
-                firstName: data.firstName || data.first_name || data.First_Name || data.name || '',
-                lastName: data.lastName || data.last_name || data.Last_Name || '',
-                email1: data.email1 || data.email || data.Email || '',
-                email2: data.email2 || '',
-                phone1: data.phone1 || data.phone || data.Phone || '',
-                phone2: data.phone2 || '',
-                companyName: data.companyName || data.company_name || data.Business_Name || '',
-                jobDescription: data.jobDescription || '',
-                tag: data.tag || (data.tags ? (Array.isArray(data.tags) ? data.tags.join(', ') : data.tags) : ''),
-                otherInfo: data.otherInfo || data.Notes || data.comments || '',
-                createdAt: data.createdAt || data.created_at || null
-              } as Contact;
-            });
-
-            // Merge by ID to avoid duplicates if same data exists in multiple spots or on updates
-            const map = new Map(prev.map(c => [c.id, c]));
-            newContacts.forEach(c => map.set(c.id, c));
-            return Array.from(map.values());
-          });
-        }, (error) => {
-          console.warn(`Snapshot failed for [${collName}]:`, error.message);
-        });
-        unsubscribes.push(unsub);
-      });
-
-      return () => unsubscribes.forEach(u => u());
-    };
-
-    const contactsUnsubscribePromise = fetchContacts();
-    
-    return () => {
-      unsubLeads();
-      unsubDeals();
-      unsubTasks();
-      contactsUnsubscribePromise.then(u => u());
-    };
-  }, [user]);
-
-  const handleLogin = async () => {
+  // Data Fetching
+  const refreshData = async () => {
     try {
-      const provider = new GoogleAuthProvider();
-      // Force select account to ensure the popup stays open for interaction
-      provider.setCustomParameters({ prompt: 'select_account' });
-      await signInWithPopup(auth, provider);
-    } catch (error: any) {
-      console.error("Login failed", error);
-      if (error.code === 'auth/unauthorized-domain') {
-        alert(`Login failed: This domain (${window.location.hostname}) is not authorized in your Firebase project.\n\nPlease add it to the "Authorized domains" list in the Firebase Console (Authentication > Settings > Authorized domains).`);
-      } else if (error.code === 'auth/popup-blocked') {
-        alert("Login failed: The popup was blocked by your browser. Please allow popups for this site and try again.");
-      } else {
-        alert(`Login failed: ${error.message}\nCode: ${error.code}`);
-      }
+      const [leadsRes, dealsRes, tasksRes, contactsRes] = await Promise.all([
+        fetch('/api/leads').then(r => r.json()),
+        fetch('/api/deals').then(r => r.json()),
+        fetch('/api/tasks').then(r => r.json()),
+        fetch('/api/contacts').then(r => r.json())
+      ]);
+
+      setLeads(leadsRes);
+      setDeals(dealsRes);
+      setTasks(tasksRes);
+      setContacts(contactsRes);
+      setTotalContactCount(contactsRes.length);
+      setLoading(false);
+    } catch (error) {
+      console.error('Failed to fetch local data:', error);
+      setLoading(false);
     }
   };
 
-  const handleLogout = () => signOut(auth);
+  useEffect(() => {
+    refreshData();
+  }, []);
+
+  const handleLogin = () => {
+    // In local mode, we just stay "logged in" as admin
+    alert("Local mode: You are already logged in as Local Admin.");
+  };
+
+  const handleLogout = () => {
+    alert("In local mode, logout is disabled.");
+  };
 
   const handleEditContact = (contact: Contact) => {
     setNewContact({
@@ -427,10 +171,10 @@ export default function App() {
   const handleDeleteContact = async (id: string) => {
     if (!window.confirm('Are you sure you want to delete this contact?')) return;
     try {
-      await deleteDoc(doc(db, 'contacts', id));
-      console.log('Contact deleted successfully');
+      await fetch(`/api/contacts/${id}`, { method: 'DELETE' });
+      setContacts(prev => prev.filter(c => c.id !== id));
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `contacts/${id}`);
+      console.error('Delete failed:', error);
     }
   };
 
@@ -443,12 +187,8 @@ export default function App() {
       header: true,
       skipEmptyLines: true,
       complete: async (results) => {
-        const batch = writeBatch(db);
         let count = 0;
-        const errors: string[] = [];
-
         for (const row of results.data as any[]) {
-          // Map CSV headers to contact fields
           const contactData = {
             firstName: row.firstName || row.FirstName || row['First Name'] || '',
             lastName: row.lastName || row.LastName || row['Last Name'] || '',
@@ -459,44 +199,23 @@ export default function App() {
             companyName: row.companyName || row.CompanyName || row.company || row.Company || '',
             jobDescription: row.jobDescription || row.JobDescription || row.job || row.Job || '',
             tag: row.tag || row.Tag || 'bulk-upload',
-            otherInfo: row.otherInfo || row.OtherInfo || row.Notes || '',
-            createdAt: serverTimestamp()
+            otherInfo: row.otherInfo || row.OtherInfo || row.Notes || ''
           };
 
-          // Basic validation
-          if (!contactData.firstName || !contactData.lastName || !contactData.email1) {
-            errors.push(`Row ${count + 1}: Missing required fields (First Name, Last Name, Email)`);
-            continue;
-          }
+          if (!contactData.firstName || !contactData.lastName) continue;
 
-          const newDocRef = doc(collection(db, 'contacts'));
-          batch.set(newDocRef, contactData);
+          await fetch('/api/contacts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(contactData)
+          });
           count++;
-
-          // Firestore batch limit is 500
-          if (count % 500 === 0) {
-            try {
-              await batch.commit();
-            } catch (e) {
-              console.error('Batch commit error:', e);
-            }
-          }
         }
 
-        try {
-          await batch.commit();
-          alert(`Successfully uploaded ${count} contacts!`);
-          if (errors.length > 0) {
-            console.warn('Upload errors:', errors);
-            alert(`Some rows were skipped:\n${errors.slice(0, 5).join('\n')}${errors.length > 5 ? '\n...' : ''}`);
-          }
-        } catch (error) {
-          handleFirestoreError(error, OperationType.WRITE, 'contacts/bulk');
-        } finally {
-          setUploading(false);
-          // Clear input
-          event.target.value = '';
-        }
+        alert(`Successfully uploaded ${count} contacts!`);
+        refreshData();
+        setUploading(false);
+        event.target.value = '';
       },
       error: (error) => {
         alert(`Error parsing CSV: ${error.message}`);
@@ -610,22 +329,21 @@ export default function App() {
               <span>Sign Out</span>
             </button>
 
-            {/* Database Status Indicator */}
-            <div className="mt-4 px-4 py-3 bg-slate-50 border border-slate-200 rounded-lg">
-              <div className="flex items-center gap-2 mb-1.5">
-                <Database size={12} className="text-slate-400" />
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Storage Engine</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-mono text-slate-700 truncate max-w-[120px]">
-                  {firebaseConfig.firestoreDatabaseId || '(default)'}
-                </span>
-                <div className="flex h-1.5 w-1.5 relative">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                <div className="mt-4 px-4 py-3 bg-slate-50 border border-slate-200 rounded-lg">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <Database size={12} className="text-slate-400" />
+                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Storage Engine</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-mono text-slate-700 truncate max-w-[120px]">
+                      Local SQLite
+                    </span>
+                    <div className="flex h-1.5 w-1.5 relative">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
           </div>
         </div>
       </aside>
@@ -722,30 +440,19 @@ export default function App() {
                 }
                 const type = activeTab === 'dashboard' ? 'leads' : activeTab;
                 try {
-                  if (type === 'leads') {
-                    await addDoc(collection(db, 'leads'), {
-                      name: 'Quick Lead',
-                      company: 'New Prospect',
-                      status: 'new',
-                      createdAt: serverTimestamp()
-                    });
-                  } else if (type === 'deals') {
-                    await addDoc(collection(db, 'deals'), {
-                      title: 'New Opportunity',
-                      value: 5000,
-                      stage: 'discovery',
-                      createdAt: serverTimestamp()
-                    });
-                  } else if (type === 'tasks') {
-                    await addDoc(collection(db, 'tasks'), {
-                      title: 'New Task',
-                      status: 'todo',
-                      priority: 'medium',
-                      createdAt: serverTimestamp()
-                    });
-                  }
+                  const endpoint = `/api/${type}`;
+                  const body = type === 'leads' ? { name: 'Quick Lead', status: 'new' } :
+                               type === 'deals' ? { name: 'New Deal', value: 5000, stage: 'discovery' } :
+                               { title: 'New Task', status: 'todo', priority: 'medium' };
+
+                  await fetch(endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                  });
+                  refreshData();
                 } catch (error) {
-                  handleFirestoreError(error, OperationType.CREATE, type);
+                  console.error('Create failed:', error);
                 }
               }}
               className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-all shadow-sm"
@@ -918,6 +625,7 @@ export default function App() {
                         <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">Phones</th>
                         <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">Company</th>
                         <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">Other Info</th>
+                        <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">Date Created</th>
                         <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">Tag</th>
                         <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500 text-right">Actions</th>
                       </tr>
@@ -946,6 +654,9 @@ export default function App() {
                           <td className="px-6 py-4 text-xs text-slate-500 italic max-w-[150px] truncate">
                             {contact.otherInfo || '-'}
                           </td>
+                          <td className="px-6 py-4 text-sm text-slate-500 whitespace-nowrap">
+                            {contact.createdAt?.toDate ? contact.createdAt.toDate().toLocaleDateString() : (contact.createdAt ? new Date(contact.createdAt).toLocaleDateString() : 'Unknown')}
+                          </td>
                           <td className="px-6 py-4">
                             {contact.tag && <Badge variant="info">{contact.tag}</Badge>}
                           </td>
@@ -972,7 +683,7 @@ export default function App() {
                         </tr>
                       )) : (
                         <tr>
-                          <td colSpan={6} className="px-6 py-12 text-center text-slate-400 italic">
+                          <td colSpan={9} className="px-6 py-12 text-center text-slate-400 italic">
                             No contacts found. Click "New Contact" to add one.
                           </td>
                         </tr>
@@ -1277,26 +988,16 @@ export default function App() {
                   }
                   setSaving(true);
                   try {
-                    // Filter out empty strings for optional fields
-                    const contactToSave = Object.fromEntries(
-                      Object.entries(newContact).filter(([_, v]) => v !== '' && v !== null && v !== undefined)
-                    );
+                    const endpoint = editingContactId ? `/api/contacts/${editingContactId}` : '/api/contacts';
+                    const method = editingContactId ? 'PUT' : 'POST';
                     
-                    console.log('Attempting to save contact:', contactToSave);
+                    const response = await fetch(endpoint, {
+                      method,
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify(newContact)
+                    });
                     
-                    if (editingContactId) {
-                      await updateDoc(doc(db, 'contacts', editingContactId), {
-                        ...contactToSave,
-                        updatedAt: serverTimestamp()
-                      });
-                      console.log('Contact updated successfully');
-                    } else {
-                      await addDoc(collection(db, 'contacts'), {
-                        ...contactToSave,
-                        createdAt: serverTimestamp()
-                      });
-                      console.log('Contact saved successfully');
-                    }
+                    if (!response.ok) throw new Error('Failed to save contact');
                     
                     setShowContactModal(false);
                     setEditingContactId(null);
@@ -1312,8 +1013,10 @@ export default function App() {
                       tag: '',
                       otherInfo: ''
                     });
+                    refreshData();
                   } catch (error) {
-                    handleFirestoreError(error, editingContactId ? OperationType.UPDATE : OperationType.CREATE, 'contacts');
+                    console.error('Save failed:', error);
+                    alert('Failed to save contact locally.');
                   } finally {
                     setSaving(false);
                   }

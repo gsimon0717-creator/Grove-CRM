@@ -2,44 +2,62 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
-import admin from "firebase-admin";
-
+import Database from "better-sqlite3";
 import fs from "fs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Initialize Firebase Admin
-// This requires FIREBASE_SERVICE_ACCOUNT in environment variables or a key file
-const serviceAccountPath = path.join(process.cwd(), "grove/backend/serviceAccountKey.json");
+// Initialize SQLite Database
+const dbPath = path.join(process.cwd(), "grove-crm.db");
+const db = new Database(dbPath);
 
-if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-  try {
-    const serviceAccount = JSON.parse(
-      process.env.FIREBASE_SERVICE_ACCOUNT.startsWith('{') 
-        ? process.env.FIREBASE_SERVICE_ACCOUNT 
-        : Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT, 'base64').toString()
-    );
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount)
-    });
-    console.log("Firebase Admin initialized successfully from environment variable.");
-  } catch (error) {
-    console.error("Failed to initialize Firebase Admin from environment variable:", error);
-  }
-} else if (fs.existsSync(serviceAccountPath)) {
-  try {
-    const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount)
-    });
-    console.log("Firebase Admin initialized successfully from serviceAccountKey.json.");
-  } catch (error) {
-    console.error("Failed to initialize Firebase Admin from serviceAccountKey.json:", error);
-  }
-} else {
-  console.warn("Firebase Admin NOT initialized. Please set FIREBASE_SERVICE_ACCOUNT or provide grove/backend/serviceAccountKey.json");
-}
+// Create tables if they don't exist
+db.exec(`
+  CREATE TABLE IF NOT EXISTS contacts (
+    id TEXT PRIMARY KEY,
+    firstName TEXT,
+    lastName TEXT,
+    email1 TEXT,
+    email2 TEXT,
+    phone1 TEXT,
+    phone2 TEXT,
+    companyName TEXT,
+    jobDescription TEXT,
+    tag TEXT,
+    otherInfo TEXT,
+    createdAt TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS leads (
+    id TEXT PRIMARY KEY,
+    name TEXT,
+    email TEXT,
+    phone TEXT,
+    status TEXT,
+    value REAL,
+    source TEXT,
+    createdAt TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS deals (
+    id TEXT PRIMARY KEY,
+    name TEXT,
+    value REAL,
+    stage TEXT,
+    expectedCloseDate TEXT,
+    createdAt TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS tasks (
+    id TEXT PRIMARY KEY,
+    title TEXT,
+    deadline TEXT,
+    status TEXT,
+    priority TEXT,
+    createdAt TEXT
+  );
+`);
 
 async function startServer() {
   const app = express();
@@ -47,61 +65,127 @@ async function startServer() {
 
   app.use(express.json());
 
-  // Middleware to check API Key
-  const authenticateAgent = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    const apiKey = req.headers['x-api-key'];
-    const validKey = process.env.GROVE_API_KEY;
-
-    if (!validKey) {
-      return res.status(500).json({ error: "API access not configured. Set GROVE_API_KEY in secrets." });
-    }
-
-    if (apiKey !== validKey) {
-      return res.status(401).json({ error: "Invalid API Key" });
-    }
-    next();
-  };
-
-  // API Routes for Agent Access
+  // API Routes
   app.get("/api/health", (req, res) => {
-    res.json({ status: "ok", service: "Grove CRM API" });
+    res.json({ status: "ok", mode: "local-sqlite" });
   });
 
-  // Get all leads
-  app.get("/api/v1/leads", authenticateAgent, async (req, res) => {
-    try {
-      const snapshot = await admin.firestore().collection('leads').get();
-      const leads = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      res.json(leads);
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
-    }
+  // --- CONTACTS ---
+  app.get("/api/contacts", (req, res) => {
+    const rows = db.prepare("SELECT * FROM contacts ORDER BY createdAt DESC").all();
+    res.json(rows);
   });
 
-  // Get all contacts
-  app.get("/api/v1/contacts", authenticateAgent, async (req, res) => {
-    try {
-      const snapshot = await admin.firestore().collection('contacts').get();
-      const contacts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      res.json(contacts);
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
-    }
+  app.post("/api/contacts", (req, res) => {
+    const contact = req.body;
+    const id = contact.id || Math.random().toString(36).substring(2, 15);
+    const createdAt = contact.createdAt || new Date().toISOString();
+    
+    const stmt = db.prepare(`
+      INSERT INTO contacts (id, firstName, lastName, email1, email2, phone1, phone2, companyName, jobDescription, tag, otherInfo, createdAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    
+    stmt.run(
+      id, 
+      contact.firstName || '', 
+      contact.lastName || '', 
+      contact.email1 || '', 
+      contact.email2 || '', 
+      contact.phone1 || '', 
+      contact.phone2 || '', 
+      contact.companyName || '', 
+      contact.jobDescription || '', 
+      contact.tag || '', 
+      contact.otherInfo || '',
+      createdAt
+    );
+    res.json({ id, ...contact, createdAt });
   });
 
-  // Create a new lead
-  app.post("/api/v1/leads", authenticateAgent, async (req, res) => {
-    try {
-      const leadData = req.body;
-      const docRef = await admin.firestore().collection('leads').add({
-        ...leadData,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
-      });
-      res.status(201).json({ id: docRef.id, message: "Lead created successfully" });
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
-    }
+  app.put("/api/contacts/:id", (req, res) => {
+    const { id } = req.params;
+    const contact = req.body;
+    const stmt = db.prepare(`
+      UPDATE contacts SET 
+        firstName = ?, lastName = ?, email1 = ?, email2 = ?, 
+        phone1 = ?, phone2 = ?, companyName = ?, jobDescription = ?, 
+        tag = ?, otherInfo = ?
+      WHERE id = ?
+    `);
+    stmt.run(
+      contact.firstName || '', 
+      contact.lastName || '', 
+      contact.email1 || '', 
+      contact.email2 || '', 
+      contact.phone1 || '', 
+      contact.phone2 || '', 
+      contact.companyName || '', 
+      contact.jobDescription || '', 
+      contact.tag || '', 
+      contact.otherInfo || '',
+      id
+    );
+    res.json({ id, ...contact });
+  });
+
+  app.delete("/api/contacts/:id", (req, res) => {
+    db.prepare("DELETE FROM contacts WHERE id = ?").run(req.params.id);
+    res.json({ success: true });
+  });
+
+  // --- LEADS ---
+  app.get("/api/leads", (req, res) => {
+    const rows = db.prepare("SELECT * FROM leads ORDER BY createdAt DESC").all();
+    res.json(rows);
+  });
+
+  app.post("/api/leads", (req, res) => {
+    const lead = req.body;
+    const id = lead.id || Math.random().toString(36).substring(2, 15);
+    const createdAt = new Date().toISOString();
+    const stmt = db.prepare(`
+      INSERT INTO leads (id, name, email, phone, status, value, source, createdAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(id, lead.name, lead.email, lead.phone, lead.status, lead.value, lead.source, createdAt);
+    res.json({ id, ...lead, createdAt });
+  });
+
+  // --- DEALS ---
+  app.get("/api/deals", (req, res) => {
+    const rows = db.prepare("SELECT * FROM deals ORDER BY createdAt DESC").all();
+    res.json(rows);
+  });
+
+  app.post("/api/deals", (req, res) => {
+    const deal = req.body;
+    const id = deal.id || Math.random().toString(36).substring(2, 15);
+    const createdAt = new Date().toISOString();
+    const stmt = db.prepare(`
+      INSERT INTO deals (id, name, value, stage, expectedCloseDate, createdAt)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(id, deal.name, deal.value, deal.stage, deal.expectedCloseDate, createdAt);
+    res.json({ id, ...deal, createdAt });
+  });
+
+  // --- TASKS ---
+  app.get("/api/tasks", (req, res) => {
+    const rows = db.prepare("SELECT * FROM tasks ORDER BY createdAt DESC").all();
+    res.json(rows);
+  });
+
+  app.post("/api/tasks", (req, res) => {
+    const task = req.body;
+    const id = task.id || Math.random().toString(36).substring(2, 15);
+    const createdAt = new Date().toISOString();
+    const stmt = db.prepare(`
+      INSERT INTO tasks (id, title, deadline, status, priority, createdAt)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(id, task.title, task.deadline, task.status, task.priority, createdAt);
+    res.json({ id, ...task, createdAt });
   });
 
   // Vite middleware for development
@@ -120,7 +204,7 @@ async function startServer() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Grove CRM Server running on http://localhost:${PORT}`);
+    console.log(`Grove CRM Server running on http://localhost:${PORT} in LOCAL mode`);
   });
 }
 
