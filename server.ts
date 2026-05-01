@@ -72,8 +72,34 @@ async function startServer() {
 
   // --- CONTACTS ---
   app.get("/api/contacts", (req, res) => {
-    const rows = db.prepare("SELECT * FROM contacts ORDER BY createdAt DESC").all();
+    const { q, sortBy, order, tag } = req.query;
+    let queryStr = "SELECT * FROM contacts WHERE 1=1";
+    const params: any[] = [];
+
+    if (q) {
+      queryStr += " AND (firstName LIKE ? OR lastName LIKE ? OR email1 LIKE ? OR email2 LIKE ? OR tag LIKE ?)";
+      const searchTerm = `%${q}%`;
+      params.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
+    }
+
+    if (tag) {
+      queryStr += " AND tag = ?";
+      params.push(tag);
+    }
+
+    const allowedSortColumns = ['firstName', 'lastName', 'email1', 'companyName', 'tag', 'createdAt'];
+    const sortCol = allowedSortColumns.includes(sortBy as string) ? sortBy : 'createdAt';
+    const sortDir = order === 'asc' ? 'ASC' : 'DESC';
+    
+    queryStr += ` ORDER BY ${sortCol} ${sortDir}`;
+
+    const rows = db.prepare(queryStr).all(...params);
     res.json(rows);
+  });
+
+  app.get("/api/tags", (req, res) => {
+    const rows = db.prepare("SELECT DISTINCT tag FROM contacts WHERE tag IS NOT NULL AND tag != ''").all();
+    res.json(rows.map((r: any) => r.tag));
   });
 
   app.post("/api/contacts", (req, res) => {

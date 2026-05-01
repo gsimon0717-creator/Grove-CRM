@@ -26,6 +26,7 @@ import {
   Upload
 } from 'lucide-react';
 import Papa from 'papaparse';
+import AIAssistant from './components/AIAssistant';
 import { Lead, Contact, Deal, Task, UserProfile } from './types';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -96,6 +97,9 @@ export default function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [totalContactCount, setTotalContactCount] = useState(0);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' }>({ key: 'createdAt', direction: 'desc' });
+  const [tagFilter, setTagFilter] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 50;
   const [editingContactId, setEditingContactId] = useState<string | null>(null);
@@ -117,13 +121,17 @@ export default function App() {
   });
 
   // Data Fetching
-  const refreshData = async () => {
+  const refreshData = async (query = searchQuery, sort = sortConfig, tag = tagFilter) => {
     try {
+      let contactsUrl = `/api/contacts?sortBy=${sort.key}&order=${sort.direction}`;
+      if (query) contactsUrl += `&q=${encodeURIComponent(query)}`;
+      if (tag) contactsUrl += `&tag=${encodeURIComponent(tag)}`;
+      
       const [leadsRes, dealsRes, tasksRes, contactsRes] = await Promise.all([
         fetch('/api/leads').then(r => r.json()),
         fetch('/api/deals').then(r => r.json()),
         fetch('/api/tasks').then(r => r.json()),
-        fetch('/api/contacts').then(r => r.json())
+        fetch(contactsUrl).then(r => r.json())
       ]);
 
       setLeads(leadsRes);
@@ -140,7 +148,16 @@ export default function App() {
 
   useEffect(() => {
     refreshData();
-  }, []);
+  }, [searchQuery, sortConfig, tagFilter]);
+
+  const toggleSort = (key: string) => {
+    setSortConfig(prev => ({
+      key,
+      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
+    }));
+  };
+
+  const uniqueTags = Array.from(new Set(contacts.map(c => c.tag).filter(Boolean))) as string[];
 
   const handleLogin = () => {
     // In local mode, we just stay "logged in" as admin
@@ -396,10 +413,28 @@ export default function App() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
               <input 
                 type="text" 
-                placeholder="Search anything..." 
-                className="pl-10 pr-4 py-2 text-sm bg-slate-100 border-transparent focus:bg-white focus:border-emerald-500 rounded-lg transition-all outline-none w-64"
+                placeholder="Search contacts by name, email, or tag..." 
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10 pr-4 py-2 text-sm bg-slate-100 border-transparent focus:bg-white focus:border-emerald-500 rounded-lg transition-all outline-none w-80"
               />
             </div>
+
+            {activeTab === 'contacts' && (
+              <div className="relative">
+                <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                <select
+                  value={tagFilter}
+                  onChange={(e) => setTagFilter(e.target.value)}
+                  className="pl-9 pr-8 py-2 text-sm bg-slate-100 border-transparent focus:bg-white focus:border-emerald-500 rounded-lg transition-all outline-none appearance-none cursor-pointer"
+                >
+                  <option value="">All Tags</option>
+                  {uniqueTags.map(tag => (
+                    <option key={tag} value={tag}>{tag}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             <button className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg relative">
               <Bell size={20} />
               <span className="absolute top-2 right-2 w-2 h-2 bg-rose-500 rounded-full border-2 border-white"></span>
@@ -619,14 +654,37 @@ export default function App() {
                   <table className="w-full text-left border-collapse">
                     <thead>
                       <tr className="bg-slate-50 border-b border-slate-200">
-                        <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">First Name</th>
-                        <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">Last Name</th>
-                        <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">Emails</th>
-                        <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">Phones</th>
-                        <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">Company</th>
-                        <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">Other Info</th>
-                        <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">Date Created</th>
-                        <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">Tag</th>
+                        {['firstName', 'lastName', 'email1', 'phones', 'companyName', 'otherInfo', 'createdAt', 'tag'].map((key) => {
+                          const labels: Record<string, string> = {
+                            firstName: 'First Name',
+                            lastName: 'Last Name',
+                            email1: 'Emails',
+                            phones: 'Phones',
+                            companyName: 'Company',
+                            otherInfo: 'Other Info',
+                            createdAt: 'Date Created',
+                            tag: 'Tag'
+                          };
+                          const isSortable = ['firstName', 'lastName', 'email1', 'companyName', 'tag', 'createdAt'].includes(key);
+                          
+                          return (
+                            <th 
+                              key={key}
+                              className={cn(
+                                "px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500",
+                                isSortable && "cursor-pointer hover:text-slate-900 transition-colors"
+                              )}
+                              onClick={() => isSortable && toggleSort(key)}
+                            >
+                              <div className="flex items-center gap-1">
+                                {labels[key]}
+                                {isSortable && sortConfig.key === key && (
+                                  <TrendingUp size={12} className={cn("transition-transform", sortConfig.direction === 'desc' ? "rotate-180" : "")} />
+                                )}
+                              </div>
+                            </th>
+                          );
+                        })}
                         <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500 text-right">Actions</th>
                       </tr>
                     </thead>
@@ -1036,6 +1094,7 @@ export default function App() {
           </div>
         </div>
       )}
+      <AIAssistant />
     </div>
   );
 }
