@@ -136,11 +136,15 @@ export default function ContactDetail({ contactId, onBack, onUpdate }: ContactDe
                     />
                   </div>
                   <div className="space-y-1 col-span-2">
-                    <label className="text-xs font-bold text-slate-500 uppercase">Tag</label>
+                    <div className="flex justify-between">
+                      <label className="text-xs font-bold text-slate-500 uppercase">Tags</label>
+                      <span className="text-[10px] text-slate-400">Separate with commas</span>
+                    </div>
                     <input 
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
                       value={contact.tag || ''}
                       onChange={e => setContact({...contact, tag: e.target.value})}
+                      placeholder="e.g. investor, tech, vip"
                     />
                   </div>
                   <button type="submit" className="col-span-2 bg-emerald-600 text-white py-2 rounded-lg hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2 mt-2">
@@ -167,10 +171,16 @@ export default function ContactDetail({ contactId, onBack, onUpdate }: ContactDe
                     <p className="text-slate-800">{contact.phone1 || 'N/A'}</p>
                   </div>
                   <div>
-                    <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Tag</p>
-                    <span className="px-2 py-1 bg-emerald-100 text-emerald-700 rounded-md text-xs font-bold">
-                      {contact.tag || 'Uncategorized'}
-                    </span>
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Tags</p>
+                    <div className="flex flex-wrap gap-1">
+                      {contact.tag ? contact.tag.split(',').map((t, idx) => (
+                        <span key={idx} className="px-2 py-1 bg-emerald-100 text-emerald-700 rounded-md text-[10px] font-bold">
+                          {t.trim()}
+                        </span>
+                      )) : (
+                        <span className="text-slate-400 italic text-sm">No tags</span>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}

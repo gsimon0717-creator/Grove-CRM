@@ -91,8 +91,9 @@ async function startServer() {
     }
 
     if (tag) {
-      queryStr += " AND tag = ?";
-      params.push(tag);
+      // Handle comma-separated tags by checking if the tag exists within the string
+      queryStr += " AND (',' || REPLACE(tag, ' ', '') || ',') LIKE ?";
+      params.push(`%,${(tag as string).replace(/\s/g, '')},%`);
     }
 
     const allowedSortColumns = ['firstName', 'lastName', 'email1', 'companyName', 'tag', 'createdAt'];
@@ -140,8 +141,15 @@ async function startServer() {
   });
 
   app.get("/api/tags", (req, res) => {
-    const rows = db.prepare("SELECT DISTINCT tag FROM contacts WHERE tag IS NOT NULL AND tag != ''").all();
-    res.json(rows.map((r: any) => r.tag));
+    const rows = db.prepare("SELECT tag FROM contacts WHERE tag IS NOT NULL AND tag != ''").all();
+    const allTags = new Set<string>();
+    rows.forEach((r: any) => {
+      r.tag.split(',').forEach((t: string) => {
+        const trimmed = t.trim();
+        if (trimmed) allTags.add(trimmed);
+      });
+    });
+    res.json(Array.from(allTags).sort());
   });
 
   app.post("/api/contacts", (req, res) => {
@@ -300,9 +308,16 @@ async function startServer() {
   const executeServerTool = async (name: string, args: any) => {
     switch (name) {
       case 'search_contacts':
-        let q = "SELECT * FROM contacts WHERE firstName LIKE ? OR lastName LIKE ? OR email1 LIKE ? OR tag LIKE ?";
+        let q = "SELECT * FROM contacts WHERE (firstName LIKE ? OR lastName LIKE ? OR email1 LIKE ? OR tag LIKE ?)";
         const term = `%${args.query}%`;
-        return db.prepare(q).all(term, term, term, term);
+        const params: any[] = [term, term, term, term];
+        
+        if (args.tag) {
+          q += " AND (',' || REPLACE(tag, ' ', '') || ',') LIKE ?";
+          params.push(`%,${args.tag.replace(/\s/g, '')},%`);
+        }
+        
+        return db.prepare(q).all(...params);
       case 'get_interactions':
         return db.prepare("SELECT * FROM interactions WHERE contactId = ? ORDER BY date DESC").all(args.contactId);
       case 'create_interaction':

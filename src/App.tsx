@@ -122,6 +122,7 @@ export default function App() {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 50;
   const [editingContactId, setEditingContactId] = useState<string | null>(null);
+  const [availableTags, setAvailableTags] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -146,17 +147,19 @@ export default function App() {
       if (query) contactsUrl += `&q=${encodeURIComponent(query)}`;
       if (tag) contactsUrl += `&tag=${encodeURIComponent(tag)}`;
       
-      const [leadsRes, dealsRes, tasksRes, contactsRes] = await Promise.all([
+      const [leadsRes, dealsRes, tasksRes, contactsRes, tagsRes] = await Promise.all([
         fetch('/api/leads').then(r => r.json()),
         fetch('/api/deals').then(r => r.json()),
         fetch('/api/tasks').then(r => r.json()),
-        fetch(contactsUrl).then(r => r.json())
+        fetch(contactsUrl).then(r => r.json()),
+        fetch('/api/tags').then(r => r.json())
       ]);
 
       setLeads(leadsRes);
       setDeals(dealsRes);
       setTasks(tasksRes);
       setContacts(contactsRes);
+      setAvailableTags(tagsRes);
       setTotalContactCount(contactsRes.length);
       setLoading(false);
     } catch (error) {
@@ -175,8 +178,6 @@ export default function App() {
       direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
     }));
   };
-
-  const uniqueTags = Array.from(new Set(contacts.map(c => c.tag).filter(Boolean))) as string[];
 
   const handleLogin = () => {
     // In local mode, we just stay "logged in" as admin
@@ -459,7 +460,7 @@ export default function App() {
                   className="pl-9 pr-8 py-2 text-sm bg-slate-100 border-transparent focus:bg-white focus:border-emerald-500 rounded-lg transition-all outline-none appearance-none cursor-pointer"
                 >
                   <option value="">All Tags</option>
-                  {uniqueTags.map(tag => (
+                  {availableTags.map(tag => (
                     <option key={tag} value={tag}>{tag}</option>
                   ))}
                 </select>
@@ -758,7 +759,24 @@ export default function App() {
                                 {contact.createdAt?.toDate ? contact.createdAt.toDate().toLocaleDateString() : (contact.createdAt ? new Date(contact.createdAt).toLocaleDateString() : 'Unknown')}
                               </td>
                               <td className="px-6 py-4">
-                                {contact.tag && <Badge variant="info">{contact.tag}</Badge>}
+                                <div className="flex flex-wrap gap-1">
+                                  {contact.tag && contact.tag.split(',').map((t, idx) => (
+                                    <span key={idx}>
+                                      <Badge variant="info">
+                                        <button 
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setTagFilter(t.trim());
+                                          }}
+                                          className="hover:underline"
+                                        >
+                                          {t.trim()}
+                                        </button>
+                                      </Badge>
+                                    </span>
+                                  ))}
+                                  {!contact.tag && <span className="text-slate-300">-</span>}
+                                </div>
                               </td>
                               <td className="px-6 py-4 text-right">
                                 <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1036,13 +1054,16 @@ export default function App() {
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-500 uppercase">Tag</label>
+                  <div className="flex justify-between">
+                    <label className="text-xs font-bold text-slate-500 uppercase">Tags</label>
+                    <span className="text-[10px] text-slate-400">Comma-separated</span>
+                  </div>
                   <input 
                     type="text" 
                     value={newContact.tag}
                     onChange={(e) => setNewContact({...newContact, tag: e.target.value})}
                     className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:border-emerald-500 outline-none transition-all"
-                    placeholder="VIP, Partner, etc."
+                    placeholder="VIP, Partner, Lead"
                   />
                 </div>
                 <div className="space-y-1 md:col-span-2">
