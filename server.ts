@@ -664,9 +664,30 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Grove CRM Server primary listener on http://localhost:${PORT}`);
-  });
+  // Resilient dual-port listener
+  // This allows the app to run on port 3000 (for AI Studio) AND port 3001 (for local network)
+  // If one port is already in use (e.g., by another CRM instance), it will skip it instead of crashing.
+  const startOn = (port: number) => {
+    const serverInstance = app.listen(port, "0.0.0.0", () => {
+      console.log(`Grove CRM Server active on http://0.0.0.0:${port}`);
+    });
+
+    serverInstance.on('error', (err: any) => {
+      if (err.code === 'EADDRINUSE') {
+        console.warn(`[WARN] Port ${port} is already in use. Skipping...`);
+      } else {
+        console.error(`[ERROR] Server error on port ${port}:`, err);
+      }
+    });
+  };
+
+  // Start on the primary port (from env or 3000)
+  startOn(PORT);
+
+  // Also start on 3001 if it's not the same as the primary port
+  if (PORT !== 3001) {
+    startOn(3001);
+  }
 }
 
 startServer();
