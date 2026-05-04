@@ -51,6 +51,44 @@ const getInteractionsTool: FunctionDeclaration = {
   },
 };
 
+const createInteractionTool: FunctionDeclaration = {
+  name: "create_interaction",
+  parameters: {
+    type: Type.OBJECT,
+    description: "Log a new interaction (summary of discussion, call, meeting) for a specific contact.",
+    properties: {
+      contactId: {
+        type: Type.STRING,
+        description: "The unique ID of the contact.",
+      },
+      date: {
+        type: Type.STRING,
+        description: "The date of the interaction (YYYY-MM-DD). Use today's date if not specified.",
+      },
+      description: {
+        type: Type.STRING,
+        description: "A summary of what was discussed.",
+      }
+    },
+    required: ["contactId", "description"],
+  },
+};
+
+const searchInteractionsTool: FunctionDeclaration = {
+  name: "search_interactions_globally",
+  parameters: {
+    type: Type.OBJECT,
+    description: "Search all interaction logs across all contacts for specific keywords (e.g., 'budget', 'meeting').",
+    properties: {
+      query: {
+        type: Type.STRING,
+        description: "The keyword to search for in interaction summaries.",
+      }
+    },
+    required: ["query"],
+  },
+};
+
 export default function AIAssistant() {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
@@ -66,26 +104,43 @@ export default function AIAssistant() {
     }
   }, [messages]);
 
-  const systemInstruction = "You are a helpful CRM assistant. Your goal is to help users find contact information, prepare bulk communications, and review history. \n\n- To find someone, search by tag, or get an email: use 'search_contacts'.\n- To see what tags are available: use 'list_tags'.\n- To see interaction history/logs for a contact: use 'get_interactions' with the contact's ID.\n\nWhen a user asks about the 'last interaction' or 'what was discussed', find the contact first, then fetch their interactions. Provide the date and summary clearly. For bulk emails, provide a comma-separated list of emails. Be concise and professional.";
-  const tools = [searchContactsTool, listTagsTool, getInteractionsTool];
+  const systemInstruction = "You are a highly efficient CRM assistant. Your primary objective is to help the user manage their professional relationships through the CRM API.\n\n### CORE CAPABILITIES:\n1. **Find Contacts:** Use 'search_contacts' by name, email, or tag. ALWAYS verify you have the correct contact ID before logging interactions.\n2. **Manage Interactions:** \n   - To see history: use 'get_interactions' with a contactId.\n   - To log a NEW discussion: use 'create_interaction'. This is vital for keeping logs up to date. Date defaults to today if omitted.\n   - To find specific past discussions: use 'search_interactions_globally' to find keywords across all logs.\n3. **Insights:** Help users summarize what has been discussed recently with specific tags or people.\n\n### GUIDELINES:\n- When asked 'what was our last talk with John?', first SEARCH for John, then FETCH his interactions, then summarize.\n- If multiple contacts match a name, list them and ask for clarification.\n- For bulk email requests (e.g., 'get emails for all investors'), return a clean comma-separated list.\n- Be concise, professional, and technical where appropriate (e.g., referencing 'ID' or 'Interaction Log').";
+  const tools = [searchContactsTool, listTagsTool, getInteractionsTool, createInteractionTool, searchInteractionsTool];
 
   const executeFunction = async (name: string, args: any) => {
     if (name === 'search_contacts') {
       let url = `/api/contacts?q=${encodeURIComponent(args.query)}`;
       if (args.tag) url += `&tag=${encodeURIComponent(args.tag)}`;
       const res = await fetch(url);
-      const data = await res.json();
-      return data;
+      return await res.json();
     }
     if (name === 'list_tags') {
       const res = await fetch('/api/tags');
-      const data = await res.json();
-      return data;
+      return await res.json();
     }
     if (name === 'get_interactions') {
       const res = await fetch(`/api/contacts/${args.contactId}/interactions`);
-      const data = await res.json();
-      return data;
+      return await res.json();
+    }
+    if (name === 'search_interactions_globally') {
+      const res = await fetch(`/api/interactions/search?q=${encodeURIComponent(args.query)}`);
+      return await res.json();
+    }
+    if (name === 'create_interaction') {
+      const payload = {
+        date: args.date || new Date().toISOString().split('T')[0],
+        description: args.description
+      };
+      const res = await fetch(`/api/contacts/${args.contactId}/interactions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        return { error: error.message || 'Failed to create interaction via API' };
+      }
+      return await res.json();
     }
     return { error: 'Function not found' };
   };

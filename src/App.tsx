@@ -288,9 +288,20 @@ export default function App() {
           </button>
           <div className="mt-8 pt-8 border-t border-slate-100">
             <p className="text-xs text-slate-400 uppercase tracking-widest font-bold mb-4">API Access for Agents</p>
-            <code className="block p-3 bg-slate-50 rounded-lg text-xs text-slate-600 text-left overflow-x-auto">
-              GET /api/v1/leads
-            </code>
+            <div className="space-y-4 text-left">
+              <div>
+                <p className="text-[10px] font-bold text-slate-400 mb-1">EXECUTE COMMAND (NLP)</p>
+                <code className="block p-3 bg-slate-50 rounded-lg text-[10px] text-slate-600 overflow-x-auto">
+                  POST /api/ai/command {"{ \"prompt\": \"Log a call with John Doe...\" }"}
+                </code>
+              </div>
+              <div>
+                <p className="text-[10px] font-bold text-slate-400 mb-1">LOG INTERACTION</p>
+                <code className="block p-3 bg-slate-50 rounded-lg text-[10px] text-slate-600 overflow-x-auto">
+                  POST /api/contacts/:id/interactions {"{ \"description\": \"...\" }"}
+                </code>
+              </div>
+            </div>
           </div>
         </div>
       </div>

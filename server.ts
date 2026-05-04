@@ -105,6 +105,19 @@ async function startServer() {
     res.json(rows);
   });
 
+  app.get("/api/interactions/search", (req, res) => {
+    const { q } = req.query;
+    if (!q) return res.json([]);
+    const rows = db.prepare(`
+      SELECT i.*, c.firstName, c.lastName 
+      FROM interactions i
+      JOIN contacts c ON i.contactId = c.id
+      WHERE i.description LIKE ?
+      ORDER BY i.date DESC
+    `).all(`%${q}%`);
+    res.json(rows);
+  });
+
   app.get("/api/contacts/:id", (req, res) => {
     const row = db.prepare("SELECT * FROM contacts WHERE id = ?").get(req.params.id);
     if (row) {
@@ -244,6 +257,110 @@ async function startServer() {
   });
 
   // --- AI ASSISTANT ---
+  // --- AI ASSISTANT & AGENT API ---
+  const CRM_TOOLS = [
+    {
+      name: "search_contacts",
+      description: "Search for contacts by name, email, or tag.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          query: { type: "STRING", description: "Search term" },
+          tag: { type: "STRING", description: "Filter by tag" }
+        },
+        required: ["query"]
+      }
+    },
+    {
+      name: "get_interactions",
+      description: "Get interaction history for a contact.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          contactId: { type: "STRING", description: "Contact ID" }
+        },
+        required: ["contactId"]
+      }
+    },
+    {
+      name: "create_interaction",
+      description: "Log a new interaction (summary, call, meeting).",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          contactId: { type: "STRING", description: "Contact ID" },
+          date: { type: "STRING", description: "Date (YYYY-MM-DD)" },
+          description: { type: "STRING", description: "Summary" }
+        },
+        required: ["contactId", "description"]
+      }
+    }
+  ];
+
+  const executeServerTool = async (name: string, args: any) => {
+    switch (name) {
+      case 'search_contacts':
+        let q = "SELECT * FROM contacts WHERE firstName LIKE ? OR lastName LIKE ? OR email1 LIKE ? OR tag LIKE ?";
+        const term = `%${args.query}%`;
+        return db.prepare(q).all(term, term, term, term);
+      case 'get_interactions':
+        return db.prepare("SELECT * FROM interactions WHERE contactId = ? ORDER BY date DESC").all(args.contactId);
+      case 'create_interaction':
+        const id = Math.random().toString(36).substring(2, 15);
+        const date = args.date || new Date().toISOString().split('T')[0];
+        db.prepare("INSERT INTO interactions (id, contactId, date, description) VALUES (?, ?, ?, ?)").run(id, args.contactId, date, args.description);
+        return { success: true, id };
+      default:
+        return { error: "Unknown tool" };
+    }
+  };
+
+  app.post("/api/ai/command", async (req, res) => {
+    const { prompt } = req.body;
+    if (!prompt) return res.status(400).json({ error: "No prompt provided" });
+
+    try {
+      const { GoogleGenAI } = await import("@google/genai");
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) return res.status(500).json({ error: "Gemini API key missing" });
+
+      const ai = new GoogleGenAI({ apiKey });
+      const systemInstruction = "You are a CRM agent API. Your goal is to execute tasks based on natural language. \n1. Find contacts if needed.\n2. Log interactions or fetch history.\n3. Be concise and confirm actions.";
+      
+      const chat = ai.chats.create({
+        model: "gemini-3-flash-preview",
+        config: {
+          systemInstruction,
+          tools: [{ functionDeclarations: CRM_TOOLS as any }]
+        }
+      });
+
+      let response = await chat.sendMessage({ message: prompt });
+      
+      // Handle function calls loop (server-side)
+      let currentFunctionCalls = response.functionCalls;
+      while (currentFunctionCalls) {
+        const toolResults = [];
+        for (const call of currentFunctionCalls) {
+          const result = await executeServerTool(call.name, call.args);
+          toolResults.push({
+            functionResponse: { name: call.name, response: { result } }
+          });
+        }
+        
+        response = await chat.sendMessage({
+          message: toolResults.map(tr => ({ functionResponse: tr.functionResponse }))
+        });
+        currentFunctionCalls = response.functionCalls;
+      }
+
+      res.json({ text: response.text });
+    } catch (error: any) {
+      console.error("Agent API Error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.post("/api/chat", async (req, res) => {
     const { messages, systemInstruction, tools } = req.body;
     
@@ -255,32 +372,33 @@ async function startServer() {
         return res.status(500).json({ error: "Gemini API key not configured on server." });
       }
 
-      const genAI = new GoogleGenAI({ apiKey });
-      const model = genAI.getGenerativeModel({ 
-        model: "gemini-3-flash-preview",
-        systemInstruction,
-        tools: tools ? [{ functionDeclarations: tools }] : undefined,
-      });
-
+      const ai = new GoogleGenAI({ apiKey });
+      
       // Prepare history (excluding the last message which we'll send)
       const history = messages.slice(0, -1).map((m: any) => ({
         role: m.role === 'user' ? 'user' : 'model',
         parts: [{ text: m.content }]
       }));
 
-      const chat = model.startChat({ history });
+      const chat = ai.chats.create({ 
+        model: "gemini-3-flash-preview",
+        config: {
+          systemInstruction,
+          tools: tools ? [{ functionDeclarations: tools }] : undefined,
+        },
+        history
+      });
+
       const lastMessage = messages[messages.length - 1].content;
-      
-      const result = await chat.sendMessage(lastMessage);
-      const response = result.response;
+      const result = await chat.sendMessage({ message: lastMessage });
       
       // Return function calls or text
-      const functionCalls = response.functionCalls();
+      const functionCalls = result.functionCalls;
       if (functionCalls) {
         return res.json({ functionCalls });
       }
 
-      const text = response.text();
+      const text = result.text;
       res.json({ text });
     } catch (error: any) {
       console.error("Gemini Error:", error);
@@ -300,33 +418,34 @@ async function startServer() {
         return res.status(500).json({ error: "Gemini API key not configured on server." });
       }
 
-      const genAI = new GoogleGenAI({ apiKey });
-      const model = genAI.getGenerativeModel({ 
-        model: "gemini-3-flash-preview",
-        systemInstruction,
-        tools: tools ? [{ functionDeclarations: tools }] : undefined,
-      });
-
+      const ai = new GoogleGenAI({ apiKey });
+      
       const history = messages.map((m: any) => ({
         role: m.role === 'user' ? 'user' : 'model',
         parts: [{ text: m.content }]
       }));
 
-      const chat = model.startChat({ history });
+      const chat = ai.chats.create({ 
+        model: "gemini-3-flash-preview",
+        config: {
+          systemInstruction,
+          tools: tools ? [{ functionDeclarations: tools }] : undefined,
+        },
+        history
+      });
       
       // Send tool results back to the model
-      const result = await chat.sendMessage(toolResults.map((tr: any) => ({
-        functionResponse: tr.functionResponse
-      })));
+      const result = await chat.sendMessage({
+        message: toolResults.map((tr: any) => ({ functionResponse: tr.functionResponse }))
+      });
       
-      const response = result.response;
-      const functionCalls = response.functionCalls();
+      const functionCalls = result.functionCalls;
       
       if (functionCalls) {
         return res.json({ functionCalls });
       }
 
-      const text = response.text();
+      const text = result.text;
       res.json({ text });
     } catch (error: any) {
       console.error("Gemini Tool Error:", error);
