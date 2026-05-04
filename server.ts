@@ -709,12 +709,6 @@ async function startServer() {
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Grove CRM Server primary listener on http://localhost:${PORT}`);
   });
-
-  // Also listen on 3001 if PORT was 3000, or vice versa, to satisfy user requirements
-  const secondaryPort = PORT === 3001 ? 3000 : 3001;
-  app.listen(secondaryPort, "0.0.0.0", () => {
-    console.log(`Grove CRM Server secondary listener on http://localhost:${secondaryPort}`);
-  });
 }
 
 startServer();
