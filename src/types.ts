@@ -36,6 +36,14 @@ export interface Contact {
   createdAt?: any;
 }
 
+export interface Interaction {
+  id: string;
+  contactId: string;
+  date: string;
+  description: string;
+  createdAt: string;
+}
+
 export interface Deal {
   id?: string;
   title: string;

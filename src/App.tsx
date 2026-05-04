@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import Papa from 'papaparse';
 import AIAssistant from './components/AIAssistant';
+import ContactDetail from './components/ContactDetail';
 import { Lead, Contact, Deal, Task, UserProfile } from './types';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -96,6 +97,7 @@ export default function App() {
   const [deals, setDeals] = useState<Deal[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
+  const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
   const [totalContactCount, setTotalContactCount] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' }>({ key: 'createdAt', direction: 'desc' });
@@ -649,156 +651,176 @@ export default function App() {
 
           {activeTab === 'contacts' && (
             <div className="space-y-4">
-              <Card>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="bg-slate-50 border-b border-slate-200">
-                        {['firstName', 'lastName', 'email1', 'phones', 'companyName', 'otherInfo', 'createdAt', 'tag'].map((key) => {
-                          const labels: Record<string, string> = {
-                            firstName: 'First Name',
-                            lastName: 'Last Name',
-                            email1: 'Emails',
-                            phones: 'Phones',
-                            companyName: 'Company',
-                            otherInfo: 'Other Info',
-                            createdAt: 'Date Created',
-                            tag: 'Tag'
-                          };
-                          const isSortable = ['firstName', 'lastName', 'email1', 'companyName', 'tag', 'createdAt'].includes(key);
-                          
-                          return (
-                            <th 
-                              key={key}
-                              className={cn(
-                                "px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500",
-                                isSortable && "cursor-pointer hover:text-slate-900 transition-colors"
-                              )}
-                              onClick={() => isSortable && toggleSort(key)}
-                            >
-                              <div className="flex items-center gap-1">
-                                {labels[key]}
-                                {isSortable && sortConfig.key === key && (
-                                  <TrendingUp size={12} className={cn("transition-transform", sortConfig.direction === 'desc' ? "rotate-180" : "")} />
-                                )}
-                              </div>
-                            </th>
-                          );
-                        })}
-                        <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500 text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {contacts.length > 0 ? contacts.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((contact) => (
-                        <tr key={contact.id} className="hover:bg-slate-50 transition-colors group">
-                          <td className="px-6 py-4">
-                            <div className="font-semibold text-sm">{contact.firstName}</div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <div className="font-semibold text-sm">{contact.lastName}</div>
-                          </td>
-                          <td className="px-6 py-4 text-sm text-slate-600">
-                            <div>{contact.email1}</div>
-                            {contact.email2 && <div className="text-xs text-slate-400">{contact.email2}</div>}
-                          </td>
-                          <td className="px-6 py-4 text-sm text-slate-600">
-                            <div>{contact.phone1 || '-'}</div>
-                            {contact.phone2 && <div className="text-xs text-slate-400">{contact.phone2}</div>}
-                          </td>
-                          <td className="px-6 py-4 text-sm text-slate-600">
-                            <div>{contact.companyName || '-'}</div>
-                            <div className="text-xs text-slate-400 truncate max-w-[150px]">{contact.jobDescription}</div>
-                          </td>
-                          <td className="px-6 py-4 text-xs text-slate-500 italic max-w-[150px] truncate">
-                            {contact.otherInfo || '-'}
-                          </td>
-                          <td className="px-6 py-4 text-sm text-slate-500 whitespace-nowrap">
-                            {contact.createdAt?.toDate ? contact.createdAt.toDate().toLocaleDateString() : (contact.createdAt ? new Date(contact.createdAt).toLocaleDateString() : 'Unknown')}
-                          </td>
-                          <td className="px-6 py-4">
-                            {contact.tag && <Badge variant="info">{contact.tag}</Badge>}
-                          </td>
-                          <td className="px-6 py-4 text-right">
-                            <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button 
-                                onClick={() => handleEditContact(contact)}
-                                className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-md transition-colors"
-                                title="Edit Contact"
-                              >
-                                <Edit2 size={16} />
-                              </button>
-                              {profile?.role === 'admin' && (
-                                <button 
-                                  onClick={() => contact.id && handleDeleteContact(contact.id)}
-                                  className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors"
-                                  title="Delete Contact"
+              {selectedContactId ? (
+                <ContactDetail 
+                  contactId={selectedContactId} 
+                  onBack={() => setSelectedContactId(null)}
+                  onUpdate={refreshData}
+                />
+              ) : (
+                <>
+                  <Card>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="bg-slate-50 border-b border-slate-200">
+                            {['firstName', 'lastName', 'email1', 'phones', 'companyName', 'otherInfo', 'createdAt', 'tag'].map((key) => {
+                              const labels: Record<string, string> = {
+                                firstName: 'First Name',
+                                lastName: 'Last Name',
+                                email1: 'Emails',
+                                phones: 'Phones',
+                                companyName: 'Company',
+                                otherInfo: 'Other Info',
+                                createdAt: 'Date Created',
+                                tag: 'Tag'
+                              };
+                              const isSortable = ['firstName', 'lastName', 'email1', 'companyName', 'tag', 'createdAt'].includes(key);
+                              
+                              return (
+                                <th 
+                                  key={key}
+                                  className={cn(
+                                    "px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500",
+                                    isSortable && "cursor-pointer hover:text-slate-900 transition-colors"
+                                  )}
+                                  onClick={() => isSortable && toggleSort(key)}
                                 >
-                                  <Trash2 size={16} />
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      )) : (
-                        <tr>
-                          <td colSpan={9} className="px-6 py-12 text-center text-slate-400 italic">
-                            No contacts found. Click "New Contact" to add one.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </Card>
-
-              {/* Pagination Controls */}
-              {(totalContactCount > itemsPerPage || contacts.length > itemsPerPage) && (
-                <div className="flex items-center justify-between px-2 py-4">
-                  <div className="text-sm text-slate-500 font-medium">
-                    Showing <span className="text-slate-900">{(currentPage - 1) * itemsPerPage + 1}</span> to <span className="text-slate-900">{Math.min(currentPage * itemsPerPage, totalContactCount || contacts.length)}</span> of <span className="text-slate-900">{(totalContactCount || contacts.length).toLocaleString()}</span> contacts
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button 
-                      onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                      disabled={currentPage === 1}
-                      className="p-2 text-slate-500 hover:bg-white border border-slate-200 rounded-lg disabled:opacity-30 disabled:hover:bg-transparent transition-all"
-                    >
-                      <ChevronLeft size={18} />
-                    </button>
-                    
-                    {/* Page Numbers - Limited view */}
-                    <div className="flex items-center gap-1">
-                      {Array.from({ length: Math.min(5, Math.ceil((totalContactCount || contacts.length) / itemsPerPage)) }, (_, i) => {
-                        const pageNum = i + 1;
-                        return (
-                          <button
-                            key={pageNum}
-                            onClick={() => setCurrentPage(pageNum)}
-                            className={cn(
-                              "w-9 h-9 flex items-center justify-center text-sm font-bold rounded-lg transition-all",
-                              currentPage === pageNum 
-                                ? "bg-emerald-600 text-white shadow-md shadow-emerald-200" 
-                                : "text-slate-600 hover:bg-white border border-transparent hover:border-slate-200"
-                            )}
-                          >
-                            {pageNum}
-                          </button>
-                        );
-                      })}
-                      {Math.ceil((totalContactCount || contacts.length) / itemsPerPage) > 5 && (
-                        <span className="px-2 text-slate-400">...</span>
-                      )}
+                                  <div className="flex items-center gap-1">
+                                    {labels[key]}
+                                    {isSortable && sortConfig.key === key && (
+                                      <TrendingUp size={12} className={cn("transition-transform", sortConfig.direction === 'desc' ? "rotate-180" : "")} />
+                                    )}
+                                  </div>
+                                </th>
+                              );
+                            })}
+                            <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500 text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {contacts.length > 0 ? contacts.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((contact) => (
+                            <tr 
+                              key={contact.id} 
+                              className="hover:bg-slate-50 transition-colors group cursor-pointer"
+                              onClick={() => contact.id && setSelectedContactId(contact.id)}
+                            >
+                              <td className="px-6 py-4">
+                                <div className="font-semibold text-sm">{contact.firstName}</div>
+                              </td>
+                              <td className="px-6 py-4">
+                                <div className="font-semibold text-sm">{contact.lastName}</div>
+                              </td>
+                              <td className="px-6 py-4 text-sm text-slate-600">
+                                <div>{contact.email1}</div>
+                                {contact.email2 && <div className="text-xs text-slate-400">{contact.email2}</div>}
+                              </td>
+                              <td className="px-6 py-4 text-sm text-slate-600">
+                                <div>{contact.phone1 || '-'}</div>
+                                {contact.phone2 && <div className="text-xs text-slate-400">{contact.phone2}</div>}
+                              </td>
+                              <td className="px-6 py-4 text-sm text-slate-600">
+                                <div>{contact.companyName || '-'}</div>
+                                <div className="text-xs text-slate-400 truncate max-w-[150px]">{contact.jobDescription}</div>
+                              </td>
+                              <td className="px-6 py-4 text-xs text-slate-500 italic max-w-[150px] truncate">
+                                {contact.otherInfo || '-'}
+                              </td>
+                              <td className="px-6 py-4 text-sm text-slate-500 whitespace-nowrap">
+                                {contact.createdAt?.toDate ? contact.createdAt.toDate().toLocaleDateString() : (contact.createdAt ? new Date(contact.createdAt).toLocaleDateString() : 'Unknown')}
+                              </td>
+                              <td className="px-6 py-4">
+                                {contact.tag && <Badge variant="info">{contact.tag}</Badge>}
+                              </td>
+                              <td className="px-6 py-4 text-right">
+                                <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <button 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleEditContact(contact);
+                                    }}
+                                    className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-md transition-colors"
+                                    title="Edit Contact"
+                                  >
+                                    <Edit2 size={16} />
+                                  </button>
+                                  {profile?.role === 'admin' && (
+                                    <button 
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        contact.id && handleDeleteContact(contact.id);
+                                      }}
+                                      className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors"
+                                      title="Delete Contact"
+                                    >
+                                      <Trash2 size={16} />
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          )) : (
+                            <tr>
+                              <td colSpan={9} className="px-6 py-12 text-center text-slate-400 italic">
+                                No contacts found. Click "New Contact" to add one.
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
                     </div>
+                  </Card>
 
-                    <button 
-                      onClick={() => setCurrentPage(p => Math.min(Math.ceil((totalContactCount || contacts.length) / itemsPerPage), p + 1))}
-                      disabled={currentPage >= Math.ceil((totalContactCount || contacts.length) / itemsPerPage)}
-                      className="p-2 text-slate-500 hover:bg-white border border-slate-200 rounded-lg disabled:opacity-30 disabled:hover:bg-transparent transition-all"
-                    >
-                      <ChevronRight size={18} />
-                    </button>
-                  </div>
-                </div>
+                  {/* Pagination Controls */}
+                  {(totalContactCount > itemsPerPage || contacts.length > itemsPerPage) && (
+                    <div className="flex items-center justify-between px-2 py-4">
+                      <div className="text-sm text-slate-500 font-medium">
+                        Showing <span className="text-slate-900">{(currentPage - 1) * itemsPerPage + 1}</span> to <span className="text-slate-900">{Math.min(currentPage * itemsPerPage, totalContactCount || contacts.length)}</span> of <span className="text-slate-900">{(totalContactCount || contacts.length).toLocaleString()}</span> contacts
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button 
+                          onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                          disabled={currentPage === 1}
+                          className="p-2 text-slate-500 hover:bg-white border border-slate-200 rounded-lg disabled:opacity-30 disabled:hover:bg-transparent transition-all"
+                        >
+                          <ChevronLeft size={18} />
+                        </button>
+                        
+                        {/* Page Numbers - Limited view */}
+                        <div className="flex items-center gap-1">
+                          {Array.from({ length: Math.min(5, Math.ceil((totalContactCount || contacts.length) / itemsPerPage)) }, (_, i) => {
+                            const pageNum = i + 1;
+                            return (
+                              <button
+                                key={pageNum}
+                                onClick={() => setCurrentPage(pageNum)}
+                                className={cn(
+                                  "w-9 h-9 flex items-center justify-center text-sm font-bold rounded-lg transition-all",
+                                  currentPage === pageNum 
+                                    ? "bg-emerald-600 text-white shadow-md shadow-emerald-200" 
+                                    : "text-slate-600 hover:bg-white border border-transparent hover:border-slate-200"
+                                )}
+                              >
+                                {pageNum}
+                              </button>
+                            );
+                          })}
+                          {Math.ceil((totalContactCount || contacts.length) / itemsPerPage) > 5 && (
+                            <span className="px-2 text-slate-400">...</span>
+                          )}
+                        </div>
+
+                        <button 
+                          onClick={() => setCurrentPage(p => Math.min(Math.ceil((totalContactCount || contacts.length) / itemsPerPage), p + 1))}
+                          disabled={currentPage >= Math.ceil((totalContactCount || contacts.length) / itemsPerPage)}
+                          className="p-2 text-slate-500 hover:bg-white border border-slate-200 rounded-lg disabled:opacity-30 disabled:hover:bg-transparent transition-all"
+                        >
+                          <ChevronRight size={18} />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}

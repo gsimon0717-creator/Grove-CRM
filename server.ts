@@ -97,6 +97,18 @@ async function startServer() {
     res.json(rows);
   });
 
+  app.get("/api/contacts/:id/interactions", (req, res) => {
+    const rows = db.prepare("SELECT * FROM interactions WHERE contactId = ? ORDER BY date DESC").all(req.params.id);
+    res.json(rows);
+  });
+
+  app.post("/api/contacts/:id/interactions", (req, res) => {
+    const { date, description } = req.body;
+    const id = Math.random().toString(36).substring(2, 15);
+    db.prepare("INSERT INTO interactions (id, contactId, date, description) VALUES (?, ?, ?, ?)").run(id, req.params.id, date, description);
+    res.json({ id, contactId: req.params.id, date, description });
+  });
+
   app.get("/api/tags", (req, res) => {
     const rows = db.prepare("SELECT DISTINCT tag FROM contacts WHERE tag IS NOT NULL AND tag != ''").all();
     res.json(rows.map((r: any) => r.tag));

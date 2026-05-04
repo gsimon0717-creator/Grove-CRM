@@ -36,10 +36,25 @@ const listTagsTool: FunctionDeclaration = {
   },
 };
 
+const getInteractionsTool: FunctionDeclaration = {
+  name: "get_interactions",
+  parameters: {
+    type: Type.OBJECT,
+    description: "Get the history of interactions/logs for a specific contact.",
+    properties: {
+      contactId: {
+        type: Type.STRING,
+        description: "The unique ID of the contact.",
+      },
+    },
+    required: ["contactId"],
+  },
+};
+
 export default function AIAssistant() {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
-    { role: 'assistant', content: 'Hi! I\'m your CRM assistant. I can help you find contacts by name, email, or tag. Just ask!' }
+    { role: 'assistant', content: 'Hi! I\'m your CRM assistant. I can help you find contacts, prepare bulk emails by tag, or look up interaction history. Just ask!' }
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -66,6 +81,11 @@ export default function AIAssistant() {
       const data = await res.json();
       return data;
     }
+    if (name === 'get_interactions') {
+      const res = await fetch(`/api/contacts/${args.contactId}/interactions`);
+      const data = await res.json();
+      return data;
+    }
     return { error: 'Function not found' };
   };
 
@@ -81,8 +101,8 @@ export default function AIAssistant() {
       const chat = ai.chats.create({
         model: "gemini-3-flash-preview",
         config: {
-          systemInstruction: "You are a helpful CRM assistant. Your goal is to help users find contact information and prepare bulk communications. When a user asks to find someone, search by tag, or needs an email, use the search_contacts tool. Use list_tags to see available tags if needed. If the user wants to 'prepare a bulk email' or needs 'emails for a tag', search for all contacts with that tag and then provide their email addresses as a clear, comma-separated list that is easy to copy and paste into an email client (like Gmail). If the search results in multiple people and they didn't ask for a bulk list, ask for clarification. Be concise and professional.",
-          tools: [{ functionDeclarations: [searchContactsTool, listTagsTool] }],
+          systemInstruction: "You are a helpful CRM assistant. Your goal is to help users find contact information, prepare bulk communications, and review history. \n\n- To find someone, search by tag, or get an email: use 'search_contacts'.\n- To see what tags are available: use 'list_tags'.\n- To see interaction history/logs for a contact: use 'get_interactions' with the contact's ID.\n\nWhen a user asks about the 'last interaction' or 'what was discussed', find the contact first, then fetch their interactions. Provide the date and summary clearly. For bulk emails, provide a comma-separated list of emails. Be concise and professional.",
+          tools: [{ functionDeclarations: [searchContactsTool, listTagsTool, getInteractionsTool] }],
         },
         history: messages.slice(1).map(m => ({
           role: m.role === 'user' ? 'user' : 'model',
