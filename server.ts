@@ -75,7 +75,11 @@ async function startServer() {
 
   // API Routes
   app.get("/api/health", (req, res) => {
-    res.json({ status: "ok", mode: "local-sqlite" });
+    res.json({ 
+      status: "ok", 
+      mode: "local-sqlite",
+      hasAiKey: !!process.env.GEMINI_API_KEY
+    });
   });
 
   // --- CONTACTS ---
@@ -357,16 +361,13 @@ async function startServer() {
       const { GoogleGenAI } = await import("@google/genai");
       const apiKey = process.env.GEMINI_API_KEY;
       
-      if (!apiKey) {
-        console.error("GEMINI_API_KEY is missing from the environment. AI features will fail.");
-        return res.status(500).json({ error: "AI services are temporarily unavailable due to missing configuration." });
-      }
-
-      const ai = new GoogleGenAI({ apiKey });
+      // Initialize with the key if it exists, or empty string to allow platform fallback if applicable
+      // (Though the SDK requires a string).
+      const ai = new GoogleGenAI({ apiKey: apiKey || "" });
       const systemInstruction = "You are a CRM agent API. Your goal is to execute tasks based on natural language commands. \n\n### CAPABILITIES:\n1. Find contacts (search_contacts)\n2. Fetch interaction history for a person (get_interactions)\n3. Global keyword search across all history (search_interactions_globally)\n4. Log NEW interactions (create_interaction)\n\n### BEHAVIOR:\n- If you need a contact ID, SEARCH for the person first.\n- If multiple people match, list them and stop to ask for clarification.\n- When logging interactions, confirm the date (default: today) and summary.\n- Be concise and actionable.";
       
       const chat = ai.chats.create({
-        model: "gemini-1.5-flash",
+        model: "gemini-3-flash-preview",
         config: {
           systemInstruction,
           tools: [{ functionDeclarations: CRM_TOOLS as any }]
@@ -394,8 +395,8 @@ async function startServer() {
 
       res.json({ text: response.text });
     } catch (error: any) {
-      console.error("Agent API Error:", error);
-      res.status(500).json({ error: error.message });
+      console.error("Agent API Error [ID: CRM-777]:", error);
+      res.status(500).json({ error: `[CRM-AI-ERROR] ${error.message}` });
     }
   });
 
@@ -406,11 +407,7 @@ async function startServer() {
       const { GoogleGenAI } = await import("@google/genai");
       const apiKey = process.env.GEMINI_API_KEY;
       
-      if (!apiKey) {
-        return res.status(500).json({ error: "Gemini API key is not configured on the server." });
-      }
-
-      const ai = new GoogleGenAI({ apiKey });
+      const ai = new GoogleGenAI({ apiKey: apiKey || "" });
       
       // Prepare history (excluding the last message which we'll send)
       const history = messages.slice(0, -1).map((m: any) => ({
@@ -419,7 +416,7 @@ async function startServer() {
       }));
 
       const chat = ai.chats.create({ 
-        model: "gemini-1.5-flash",
+        model: "gemini-3-flash-preview",
         config: {
           systemInstruction,
           tools: tools ? [{ functionDeclarations: tools }] : undefined,
@@ -439,8 +436,8 @@ async function startServer() {
       const text = result.text;
       res.json({ text });
     } catch (error: any) {
-      console.error("Gemini Error:", error);
-      res.status(500).json({ error: error.message || "Failed to communicate with AI" });
+      console.error("Gemini Error [ID: CRM-CHAT]:", error);
+      res.status(500).json({ error: `[CRM-CHAT-ERROR] ${error.message || "Failed to communicate with AI"}` });
     }
   });
 
@@ -452,11 +449,7 @@ async function startServer() {
       const { GoogleGenAI } = await import("@google/genai");
       const apiKey = process.env.GEMINI_API_KEY;
       
-      if (!apiKey) {
-        return res.status(500).json({ error: "Gemini API key is not configured on the server." });
-      }
-
-      const ai = new GoogleGenAI({ apiKey });
+      const ai = new GoogleGenAI({ apiKey: apiKey || "" });
       
       const history = messages.map((m: any) => ({
         role: m.role === 'user' ? 'user' : 'model',
@@ -464,7 +457,7 @@ async function startServer() {
       }));
 
       const chat = ai.chats.create({ 
-        model: "gemini-1.5-flash",
+        model: "gemini-3-flash-preview",
         config: {
           systemInstruction,
           tools: tools ? [{ functionDeclarations: tools }] : undefined,
@@ -486,8 +479,8 @@ async function startServer() {
       const text = result.text;
       res.json({ text });
     } catch (error: any) {
-      console.error("Gemini Tool Error:", error);
-      res.status(500).json({ error: error.message || "Failed to process tool results" });
+      console.error("Gemini Tool Error [ID: CRM-TOOL]:", error);
+      res.status(500).json({ error: `[CRM-TOOL-ERROR] ${error.message || "Failed to process tool results"}` });
     }
   });
 
