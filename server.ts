@@ -13,64 +13,74 @@ const __dirname = path.dirname(__filename);
 const dbPath = path.join(process.cwd(), "grove-crm.db");
 const db = new Database(dbPath);
 
-// Create tables if they don't exist
-db.exec(`
-  CREATE TABLE IF NOT EXISTS contacts (
-    id TEXT PRIMARY KEY,
-    firstName TEXT,
-    lastName TEXT,
-    email1 TEXT,
-    email2 TEXT,
-    phone1 TEXT,
-    phone2 TEXT,
-    companyName TEXT,
-    jobDescription TEXT,
-    tag TEXT,
-    otherInfo TEXT,
-    createdAt TEXT
-  );
+  // Create tables if they don't exist
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS contacts (
+      id TEXT PRIMARY KEY,
+      firstName TEXT,
+      lastName TEXT,
+      email1 TEXT,
+      email2 TEXT,
+      phone1 TEXT,
+      phone2 TEXT,
+      companyName TEXT,
+      jobDescription TEXT,
+      tag TEXT,
+      otherInfo TEXT,
+      createdAt TEXT
+    );
 
-  CREATE TABLE IF NOT EXISTS leads (
-    id TEXT PRIMARY KEY,
-    name TEXT,
-    email TEXT,
-    phone TEXT,
-    status TEXT,
-    value REAL,
-    source TEXT,
-    createdAt TEXT
-  );
+    CREATE TABLE IF NOT EXISTS leads (
+      id TEXT PRIMARY KEY,
+      name TEXT,
+      email TEXT,
+      phone TEXT,
+      status TEXT,
+      value REAL,
+      source TEXT,
+      createdAt TEXT
+    );
 
-  CREATE TABLE IF NOT EXISTS deals (
-    id TEXT PRIMARY KEY,
-    name TEXT,
-    value REAL,
-    stage TEXT,
-    expectedCloseDate TEXT,
-    createdAt TEXT
-  );
+    CREATE TABLE IF NOT EXISTS deals (
+      id TEXT PRIMARY KEY,
+      name TEXT,
+      value REAL,
+      stage TEXT,
+      expectedCloseDate TEXT,
+      createdAt TEXT
+    );
 
-  CREATE TABLE IF NOT EXISTS tasks (
-    id TEXT PRIMARY KEY,
-    title TEXT,
-    deadline TEXT,
-    status TEXT,
-    priority TEXT,
-    createdAt TEXT
-  );
+    CREATE TABLE IF NOT EXISTS tasks (
+      id TEXT PRIMARY KEY,
+      title TEXT,
+      deadline TEXT,
+      status TEXT,
+      priority TEXT,
+      createdAt TEXT
+    );
 
-  CREATE TABLE IF NOT EXISTS interactions (
-    id TEXT PRIMARY KEY,
-    contactId TEXT,
-    date TEXT,
-    description TEXT,
-    createdAt TEXT DEFAULT CURRENT_TIMESTAMP
-  );
-`);
+    CREATE TABLE IF NOT EXISTS interactions (
+      id TEXT PRIMARY KEY,
+      contactId TEXT,
+      date TEXT,
+      description TEXT,
+      createdAt TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  // Bootstrap test contact
+  const dave = db.prepare("SELECT * FROM contacts WHERE firstName = 'Dave' AND lastName = 'Vrbas'").get();
+  if (!dave) {
+    db.prepare(`
+      INSERT INTO contacts (id, firstName, lastName, email1, companyName, tag, createdAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run('dave-vrbas-123', 'Dave', 'Vrbas', 'dave.vrbas@ubt.com', 'UBT', 'investor, vip', new Date().toISOString());
+    console.log("[CRM-BOOTSTRAP] Created Dave Vrbas for testing.");
+  }
 
 async function startServer() {
   const app = express();
-  const PORT = parseInt(process.env.PORT || "3000", 10);
+  const PORT = parseInt(process.env.PORT || "3001", 10);
 
   app.use(express.json());
 
@@ -90,16 +100,29 @@ async function startServer() {
   });
 
   app.get("/api/agent-info", (req, res) => {
+    const host = req.get('host') || `localhost:${PORT}`;
+    const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
+    const dynamicBaseURL = `${protocol}://${host}`;
+
     res.json({
       name: "Grove CRM Agent API",
-      baseURL: `http://localhost:${PORT}`,
+      baseURL: dynamicBaseURL,
+      port: PORT,
       endpoints: {
-        command: "/api/ai/command (POST { prompt: string })",
-        contacts: "/api/contacts (GET, POST)",
-        interactions: "/api/contacts/:id/interactions (GET, POST)"
+        command: "/api/ai/command",
+        contacts: "/api/contacts",
+        interactions: "/api/contacts/:id/interactions",
+        leads: "/api/leads",
+        deals: "/api/deals",
+        tasks: "/api/tasks",
+        tools_discovery: "/api/tools"
       },
-      instructions: "Always wrap URLs in quotes when using curl. For search queries with spaces, use percent encoding (e.g., 'Dave%20Vrbas'). Example: curl \"http://localhost:3000/api/contacts?q=Dave%20Vrbas\""
+      instructions: `Always use port ${PORT}. Prefer 'POST /api/ai/command' for all tasks. It understands natural language and uses internal tools autonomously.`
     });
+  });
+
+  app.get("/api/tools", (req, res) => {
+    res.json(CRM_TOOLS);
   });
 
   // --- CONTACTS ---
@@ -411,15 +434,33 @@ async function startServer() {
         },
         required: ["title"]
       }
+    },
+    {
+      name: "get_leads",
+      description: "List all leads in the CRM."
+    },
+    {
+      name: "get_deals",
+      description: "List all deals in the CRM."
+    },
+    {
+      name: "get_tasks",
+      description: "List all tasks in the CRM."
     }
   ];
 
   const executeServerTool = async (name: string, args: any) => {
     switch (name) {
+      case 'get_leads':
+        return db.prepare("SELECT * FROM leads ORDER BY createdAt DESC").all();
+      case 'get_deals':
+        return db.prepare("SELECT * FROM deals ORDER BY createdAt DESC").all();
+      case 'get_tasks':
+        return db.prepare("SELECT * FROM tasks ORDER BY createdAt DESC").all();
       case 'search_contacts':
-        let q = "SELECT * FROM contacts WHERE (firstName LIKE ? OR lastName LIKE ? OR email1 LIKE ? OR tag LIKE ?)";
+        let q = "SELECT * FROM contacts WHERE (firstName LIKE ? OR lastName LIKE ? OR email1 LIKE ? OR email2 LIKE ? OR tag LIKE ? OR companyName LIKE ?)";
         const term = `%${args.query}%`;
-        const params: any[] = [term, term, term, term];
+        const params: any[] = [term, term, term, term, term, term];
         
         if (args.tag) {
           q += " AND (',' || REPLACE(tag, ' ', '') || ',') LIKE ?";
@@ -533,7 +574,10 @@ async function startServer() {
       console.error("Agent API Error [CRM-AI]:", error);
       // provide a clean error to the agent to avoid leaking internals if not needed, 
       // but the agent needs to know it failed.
-      res.status(500).json({ error: `Internal Server Error: ${error.message}` });
+      const publicError = error.message?.includes("API_KEY") 
+        ? "The CRM data service is currently unavailable. Please try again in a few minutes."
+        : `CRM Service Difficulty: ${error.message}`;
+      res.status(500).json({ error: publicError });
     }
   });
 
