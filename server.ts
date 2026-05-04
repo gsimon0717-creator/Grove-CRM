@@ -68,19 +68,9 @@ const db = new Database(dbPath);
     );
   `);
 
-  // Bootstrap test contact
-  const dave = db.prepare("SELECT * FROM contacts WHERE firstName = 'Dave' AND lastName = 'Vrbas'").get();
-  if (!dave) {
-    db.prepare(`
-      INSERT INTO contacts (id, firstName, lastName, email1, companyName, tag, createdAt)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run('dave-vrbas-123', 'Dave', 'Vrbas', 'dave.vrbas@ubt.com', 'UBT', 'investor, vip', new Date().toISOString());
-    console.log("[CRM-BOOTSTRAP] Created Dave Vrbas for testing.");
-  }
-
 async function startServer() {
   const app = express();
-  const PORT = parseInt(process.env.PORT || "3001", 10);
+  const PORT = Number(process.env.PORT) || 3000;
 
   app.use(express.json());
 
@@ -231,8 +221,7 @@ async function startServer() {
     const contact = req.body;
     const stmt = db.prepare(`
       UPDATE contacts SET 
-        firstName = ?, lastName = ?, email1 = ?, email2 = ?, 
-        phone1 = ?, phone2 = ?, companyName = ?, jobDescription = ?, 
+        firstName = ?, lastName = ?, email1 = ?, 
         tag = ?, otherInfo = ?
       WHERE id = ?
     `);
@@ -240,11 +229,6 @@ async function startServer() {
       contact.firstName || '', 
       contact.lastName || '', 
       contact.email1 || '', 
-      contact.email2 || '', 
-      contact.phone1 || '', 
-      contact.phone2 || '', 
-      contact.companyName || '', 
-      contact.jobDescription || '', 
       contact.tag || '', 
       contact.otherInfo || '',
       id
@@ -382,16 +366,8 @@ async function startServer() {
       }
     },
     {
-      name: "list_tags",
-      description: "Get a list of all unique tags used in the CRM.",
-      parameters: {
-        type: "OBJECT",
-        properties: {}
-      }
-    },
-    {
       name: "create_interaction",
-      description: "Log an interaction (email, call, meeting, note) for a contact. ALWAYS USE THIS to record discussions.",
+      description: "Log a new interaction (summary, call, meeting).",
       parameters: {
         type: "OBJECT",
         properties: {
@@ -459,17 +435,6 @@ async function startServer() {
 
   const executeServerTool = async (name: string, args: any) => {
     switch (name) {
-      case 'list_tags': {
-        const rows = db.prepare("SELECT tag FROM contacts WHERE tag IS NOT NULL AND tag != ''").all();
-        const allTags = new Set<string>();
-        rows.forEach((r: any) => {
-          r.tag.split(',').forEach((t: string) => {
-            const trimmed = t.trim();
-            if (trimmed) allTags.add(trimmed);
-          });
-        });
-        return Array.from(allTags).sort();
-      }
       case 'get_leads':
         return db.prepare("SELECT * FROM leads ORDER BY createdAt DESC").all();
       case 'get_deals':
@@ -503,19 +468,12 @@ async function startServer() {
         
         db.prepare(`
           UPDATE contacts SET 
-            firstName = ?, lastName = ?, email1 = ?, email2 = ?, 
-            phone1 = ?, phone2 = ?, companyName = ?, jobDescription = ?, 
-            tag = ?, otherInfo = ?
+            firstName = ?, lastName = ?, email1 = ?, tag = ?, otherInfo = ?
           WHERE id = ?
         `).run(
           updates.firstName ?? current.firstName,
           updates.lastName ?? current.lastName,
           updates.email1 ?? current.email1,
-          updates.email2 ?? current.email2,
-          updates.phone1 ?? current.phone1,
-          updates.phone2 ?? current.phone2,
-          updates.companyName ?? current.companyName,
-          updates.jobDescription ?? current.jobDescription,
           updates.tag ?? current.tag,
           updates.otherInfo ?? current.otherInfo,
           id
