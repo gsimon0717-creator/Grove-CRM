@@ -357,11 +357,7 @@ async function startServer() {
       const { GoogleGenAI } = await import("@google/genai");
       const apiKey = process.env.GEMINI_API_KEY;
       
-      if (!apiKey) {
-        console.warn("GEMINI_API_KEY is not set in process.env. Attempting to proceed anyway...");
-      }
-
-      const ai = new GoogleGenAI({ apiKey: apiKey || "" });
+      const ai = new GoogleGenAI({ apiKey: apiKey || "platform-default" });
       const systemInstruction = "You are a CRM agent API. Your goal is to execute tasks based on natural language commands. \n\n### CAPABILITIES:\n1. Find contacts (search_contacts)\n2. Fetch interaction history for a person (get_interactions)\n3. Global keyword search across all history (search_interactions_globally)\n4. Log NEW interactions (create_interaction)\n\n### BEHAVIOR:\n- If you need a contact ID, SEARCH for the person first.\n- If multiple people match, list them and stop to ask for clarification.\n- When logging interactions, confirm the date (default: today) and summary.\n- Be concise and actionable.";
       
       const chat = ai.chats.create({
@@ -405,7 +401,7 @@ async function startServer() {
       const { GoogleGenAI } = await import("@google/genai");
       const apiKey = process.env.GEMINI_API_KEY;
       
-      const ai = new GoogleGenAI({ apiKey: apiKey || "" });
+      const ai = new GoogleGenAI({ apiKey: apiKey || "platform-default" });
       
       // Prepare history (excluding the last message which we'll send)
       const history = messages.slice(0, -1).map((m: any) => ({
@@ -447,7 +443,7 @@ async function startServer() {
       const { GoogleGenAI } = await import("@google/genai");
       const apiKey = process.env.GEMINI_API_KEY;
       
-      const ai = new GoogleGenAI({ apiKey: apiKey || "" });
+      const ai = new GoogleGenAI({ apiKey: apiKey || "platform-default" });
       
       const history = messages.map((m: any) => ({
         role: m.role === 'user' ? 'user' : 'model',
