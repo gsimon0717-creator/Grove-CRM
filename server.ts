@@ -100,8 +100,8 @@ async function startServer() {
   });
 
   app.get("/api/agent-info", (req, res) => {
+  const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
     const host = req.get('host') || `localhost:${PORT}`;
-    const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
     const dynamicBaseURL = `${protocol}://${host}`;
 
     res.json({
@@ -117,7 +117,7 @@ async function startServer() {
         tasks: "/api/tasks",
         tools_discovery: "/api/tools"
       },
-      instructions: `Always use port ${PORT}. Prefer 'POST /api/ai/command' for all tasks. It understands natural language and uses internal tools autonomously.`
+      instructions: "Prefer 'POST /api/ai/command' for all tasks. It handles search and execution logic. For direct REST, ensure URLs are quoted and spaces are percent-encoded."
     });
   });
 
@@ -382,8 +382,16 @@ async function startServer() {
       }
     },
     {
+      name: "list_tags",
+      description: "Get a list of all unique tags used in the CRM.",
+      parameters: {
+        type: "OBJECT",
+        properties: {}
+      }
+    },
+    {
       name: "create_interaction",
-      description: "Log a new interaction (summary, call, meeting).",
+      description: "Log an interaction (email, call, meeting, note) for a contact. ALWAYS USE THIS to record discussions.",
       parameters: {
         type: "OBJECT",
         properties: {
@@ -451,6 +459,17 @@ async function startServer() {
 
   const executeServerTool = async (name: string, args: any) => {
     switch (name) {
+      case 'list_tags': {
+        const rows = db.prepare("SELECT tag FROM contacts WHERE tag IS NOT NULL AND tag != ''").all();
+        const allTags = new Set<string>();
+        rows.forEach((r: any) => {
+          r.tag.split(',').forEach((t: string) => {
+            const trimmed = t.trim();
+            if (trimmed) allTags.add(trimmed);
+          });
+        });
+        return Array.from(allTags).sort();
+      }
       case 'get_leads':
         return db.prepare("SELECT * FROM leads ORDER BY createdAt DESC").all();
       case 'get_deals':
@@ -484,12 +503,19 @@ async function startServer() {
         
         db.prepare(`
           UPDATE contacts SET 
-            firstName = ?, lastName = ?, email1 = ?, tag = ?, otherInfo = ?
+            firstName = ?, lastName = ?, email1 = ?, email2 = ?, 
+            phone1 = ?, phone2 = ?, companyName = ?, jobDescription = ?, 
+            tag = ?, otherInfo = ?
           WHERE id = ?
         `).run(
           updates.firstName ?? current.firstName,
           updates.lastName ?? current.lastName,
           updates.email1 ?? current.email1,
+          updates.email2 ?? current.email2,
+          updates.phone1 ?? current.phone1,
+          updates.phone2 ?? current.phone2,
+          updates.companyName ?? current.companyName,
+          updates.jobDescription ?? current.jobDescription,
           updates.tag ?? current.tag,
           updates.otherInfo ?? current.otherInfo,
           id
@@ -681,8 +707,13 @@ async function startServer() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Grove CRM Server running on http://localhost:${PORT} in LOCAL mode`);
-    console.log(`[CRM-INIT] AI Configuration status: ${process.env.GEMINI_API_KEY ? 'Platform Key Active' : 'Fallback Mode (Expecting platform injection)'}`);
+    console.log(`Grove CRM Server primary listener on http://localhost:${PORT}`);
+  });
+
+  // Also listen on 3001 if PORT was 3000, or vice versa, to satisfy user requirements
+  const secondaryPort = PORT === 3001 ? 3000 : 3001;
+  app.listen(secondaryPort, "0.0.0.0", () => {
+    console.log(`Grove CRM Server secondary listener on http://localhost:${secondaryPort}`);
   });
 }
 
