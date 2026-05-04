@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { MessageSquare, Send, X, Loader2, User, Bot, Search } from 'lucide-react';
-import { GoogleGenAI, Type, FunctionDeclaration } from "@google/genai";
+import { Type, FunctionDeclaration } from "@google/genai";
 import { cn } from '../lib/utils';
 
 interface Message {
@@ -66,7 +66,8 @@ export default function AIAssistant() {
     }
   }, [messages]);
 
-  const ai = new GoogleGenAI({ apiKey: (process.env as any).GEMINI_API_KEY });
+  const systemInstruction = "You are a helpful CRM assistant. Your goal is to help users find contact information, prepare bulk communications, and review history. \n\n- To find someone, search by tag, or get an email: use 'search_contacts'.\n- To see what tags are available: use 'list_tags'.\n- To see interaction history/logs for a contact: use 'get_interactions' with the contact's ID.\n\nWhen a user asks about the 'last interaction' or 'what was discussed', find the contact first, then fetch their interactions. Provide the date and summary clearly. For bulk emails, provide a comma-separated list of emails. Be concise and professional.";
+  const tools = [searchContactsTool, listTagsTool, getInteractionsTool];
 
   const executeFunction = async (name: string, args: any) => {
     if (name === 'search_contacts') {
@@ -94,26 +95,25 @@ export default function AIAssistant() {
 
     const userMessage = input.trim();
     setInput('');
-    setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
+    const newMessages: Message[] = [...messages, { role: 'user', content: userMessage }];
+    setMessages(newMessages);
     setIsLoading(true);
 
     try {
-      const chat = ai.chats.create({
-        model: "gemini-3-flash-preview",
-        config: {
-          systemInstruction: "You are a helpful CRM assistant. Your goal is to help users find contact information, prepare bulk communications, and review history. \n\n- To find someone, search by tag, or get an email: use 'search_contacts'.\n- To see what tags are available: use 'list_tags'.\n- To see interaction history/logs for a contact: use 'get_interactions' with the contact's ID.\n\nWhen a user asks about the 'last interaction' or 'what was discussed', find the contact first, then fetch their interactions. Provide the date and summary clearly. For bulk emails, provide a comma-separated list of emails. Be concise and professional.",
-          tools: [{ functionDeclarations: [searchContactsTool, listTagsTool, getInteractionsTool] }],
-        },
-        history: messages.slice(1).map(m => ({
-          role: m.role === 'user' ? 'user' : 'model',
-          parts: [{ text: m.content }]
-        }))
+      // Call our proxy server
+      let res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          messages: newMessages,
+          systemInstruction,
+          tools
+        })
       });
 
-      let response = await chat.sendMessage({ message: userMessage });
-      let currentResponse = response;
+      let currentResponse = await res.json();
 
-      // Handle function calls
+      // Handle function calls loop
       while (currentResponse.functionCalls) {
         const toolResults = [];
         for (const call of currentResponse.functionCalls) {
@@ -125,8 +125,23 @@ export default function AIAssistant() {
             }
           });
         }
-        currentResponse = await chat.sendMessage({ message: toolResults as any });
+
+        // Send tool results back to server
+        res = await fetch('/api/chat/tool-results', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messages: newMessages, // Original history for context if needed by model logic
+            toolResults,
+            systemInstruction,
+            tools
+          })
+        });
+
+        currentResponse = await res.json();
       }
+
+      if (currentResponse.error) throw new Error(currentResponse.error);
 
       setMessages(prev => [...prev, { role: 'assistant', content: currentResponse.text || "I've processed your request." }]);
     } catch (error) {

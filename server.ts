@@ -57,6 +57,14 @@ db.exec(`
     priority TEXT,
     createdAt TEXT
   );
+
+  CREATE TABLE IF NOT EXISTS interactions (
+    id TEXT PRIMARY KEY,
+    contactId TEXT,
+    date TEXT,
+    description TEXT,
+    createdAt TEXT DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 async function startServer() {
@@ -77,9 +85,9 @@ async function startServer() {
     const params: any[] = [];
 
     if (q) {
-      queryStr += " AND (firstName LIKE ? OR lastName LIKE ? OR email1 LIKE ? OR email2 LIKE ? OR tag LIKE ?)";
+      queryStr += " AND (firstName LIKE ? OR lastName LIKE ? OR email1 LIKE ? OR email2 LIKE ? OR tag LIKE ? OR companyName LIKE ?)";
       const searchTerm = `%${q}%`;
-      params.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
+      params.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
     }
 
     if (tag) {
@@ -95,6 +103,15 @@ async function startServer() {
 
     const rows = db.prepare(queryStr).all(...params);
     res.json(rows);
+  });
+
+  app.get("/api/contacts/:id", (req, res) => {
+    const row = db.prepare("SELECT * FROM contacts WHERE id = ?").get(req.params.id);
+    if (row) {
+      res.json(row);
+    } else {
+      res.status(404).json({ error: "Contact not found" });
+    }
   });
 
   app.get("/api/contacts/:id/interactions", (req, res) => {
@@ -224,6 +241,97 @@ async function startServer() {
     `);
     stmt.run(id, task.title, task.deadline, task.status, task.priority, createdAt);
     res.json({ id, ...task, createdAt });
+  });
+
+  // --- AI ASSISTANT ---
+  app.post("/api/chat", async (req, res) => {
+    const { messages, systemInstruction, tools } = req.body;
+    
+    try {
+      const { GoogleGenAI } = await import("@google/genai");
+      const apiKey = process.env.GEMINI_API_KEY;
+      
+      if (!apiKey) {
+        return res.status(500).json({ error: "Gemini API key not configured on server." });
+      }
+
+      const genAI = new GoogleGenAI({ apiKey });
+      const model = genAI.getGenerativeModel({ 
+        model: "gemini-3-flash-preview",
+        systemInstruction,
+        tools: tools ? [{ functionDeclarations: tools }] : undefined,
+      });
+
+      // Prepare history (excluding the last message which we'll send)
+      const history = messages.slice(0, -1).map((m: any) => ({
+        role: m.role === 'user' ? 'user' : 'model',
+        parts: [{ text: m.content }]
+      }));
+
+      const chat = model.startChat({ history });
+      const lastMessage = messages[messages.length - 1].content;
+      
+      const result = await chat.sendMessage(lastMessage);
+      const response = result.response;
+      
+      // Return function calls or text
+      const functionCalls = response.functionCalls();
+      if (functionCalls) {
+        return res.json({ functionCalls });
+      }
+
+      const text = response.text();
+      res.json({ text });
+    } catch (error: any) {
+      console.error("Gemini Error:", error);
+      res.status(500).json({ error: error.message || "Failed to communicate with AI" });
+    }
+  });
+
+  // Handle Tool Results
+  app.post("/api/chat/tool-results", async (req, res) => {
+    const { messages, toolResults, systemInstruction, tools } = req.body;
+    
+    try {
+      const { GoogleGenAI } = await import("@google/genai");
+      const apiKey = process.env.GEMINI_API_KEY;
+      
+      if (!apiKey) {
+        return res.status(500).json({ error: "Gemini API key not configured on server." });
+      }
+
+      const genAI = new GoogleGenAI({ apiKey });
+      const model = genAI.getGenerativeModel({ 
+        model: "gemini-3-flash-preview",
+        systemInstruction,
+        tools: tools ? [{ functionDeclarations: tools }] : undefined,
+      });
+
+      const history = messages.map((m: any) => ({
+        role: m.role === 'user' ? 'user' : 'model',
+        parts: [{ text: m.content }]
+      }));
+
+      const chat = model.startChat({ history });
+      
+      // Send tool results back to the model
+      const result = await chat.sendMessage(toolResults.map((tr: any) => ({
+        functionResponse: tr.functionResponse
+      })));
+      
+      const response = result.response;
+      const functionCalls = response.functionCalls();
+      
+      if (functionCalls) {
+        return res.json({ functionCalls });
+      }
+
+      const text = response.text();
+      res.json({ text });
+    } catch (error: any) {
+      console.error("Gemini Tool Error:", error);
+      res.status(500).json({ error: error.message || "Failed to process tool results" });
+    }
   });
 
   // Vite middleware for development

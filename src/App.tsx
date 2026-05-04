@@ -100,8 +100,25 @@ export default function App() {
   const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
   const [totalContactCount, setTotalContactCount] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' }>({ key: 'createdAt', direction: 'desc' });
   const [tagFilter, setTagFilter] = useState('');
+
+  // Debounce search
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  // Clear selection on search or filter
+  useEffect(() => {
+    if (activeTab === 'contacts') {
+      setSelectedContactId(null);
+    }
+  }, [debouncedSearchQuery, tagFilter]);
+
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 50;
   const [editingContactId, setEditingContactId] = useState<string | null>(null);
@@ -123,7 +140,7 @@ export default function App() {
   });
 
   // Data Fetching
-  const refreshData = async (query = searchQuery, sort = sortConfig, tag = tagFilter) => {
+  const refreshData = async (query = debouncedSearchQuery, sort = sortConfig, tag = tagFilter) => {
     try {
       let contactsUrl = `/api/contacts?sortBy=${sort.key}&order=${sort.direction}`;
       if (query) contactsUrl += `&q=${encodeURIComponent(query)}`;
@@ -150,7 +167,7 @@ export default function App() {
 
   useEffect(() => {
     refreshData();
-  }, [searchQuery, sortConfig, tagFilter]);
+  }, [debouncedSearchQuery, sortConfig, tagFilter]);
 
   const toggleSort = (key: string) => {
     setSortConfig(prev => ({
