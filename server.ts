@@ -122,9 +122,19 @@ async function startServer() {
     const params: any[] = [];
 
     if (q) {
-      queryStr += " AND (firstName LIKE ? OR lastName LIKE ? OR email1 LIKE ? OR email2 LIKE ? OR tag LIKE ? OR companyName LIKE ?)";
+      // Smart search: check individual fields OR combined name
+      queryStr += ` AND (
+        firstName LIKE ? 
+        OR lastName LIKE ? 
+        OR (firstName || ' ' || lastName) LIKE ?
+        OR email1 LIKE ? 
+        OR email2 LIKE ? 
+        OR tag LIKE ? 
+        OR companyName LIKE ?
+      )`;
       const searchTerm = `%${q}%`;
-      params.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
+      // Push params for: firstName, lastName, combinedName, email1, email2, tag, companyName
+      params.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
     }
 
     if (tag) {
@@ -442,9 +452,17 @@ async function startServer() {
       case 'get_tasks':
         return db.prepare("SELECT * FROM tasks ORDER BY createdAt DESC").all();
       case 'search_contacts':
-        let q = "SELECT * FROM contacts WHERE (firstName LIKE ? OR lastName LIKE ? OR email1 LIKE ? OR email2 LIKE ? OR tag LIKE ? OR companyName LIKE ?)";
+        let q = `SELECT * FROM contacts WHERE (
+          firstName LIKE ? 
+          OR lastName LIKE ? 
+          OR (firstName || ' ' || lastName) LIKE ?
+          OR email1 LIKE ? 
+          OR email2 LIKE ? 
+          OR tag LIKE ? 
+          OR companyName LIKE ?
+        )`;
         const term = `%${args.query}%`;
-        const params: any[] = [term, term, term, term, term, term];
+        const params: any[] = [term, term, term, term, term, term, term];
         
         if (args.tag) {
           q += " AND (',' || REPLACE(tag, ' ', '') || ',') LIKE ?";
@@ -524,7 +542,25 @@ async function startServer() {
       const apiKey = process.env.GEMINI_API_KEY || "";
       
       const ai = new GoogleGenAI({ apiKey });
-      const systemInstruction = "You are a CRM agent API. Your goal is to execute tasks based on natural language commands. \n\n### CAPABILITIES:\n1. Manage Contacts (search, create, update)\n2. Manage Interactions (log new discussions, search history)\n3. Sales Pipeline (create leads, deals)\n4. Operations (create tasks)\n\n### BEHAVIOR:\n- If you need a contact ID, SEARCH for the person first.\n- If multiple people match, list them and stop to ask for clarification.\n- When logging interactions, confirm the date (default: today) and summary.\n- Be concise and actionable.\n- IF AN API ERROR OCCURS: Do not speculate about configuration or keys. Simply say \"I'm having trouble connecting to the CRM data service right now.\" and offer to try again later.";
+      const systemInstruction = `You are Audrey, the dedicated agent for Grove CRM. Your goal is to execute tasks efficiently while maintaining a professional, helpful tone.
+
+### CAPABILITIES:
+1. Manage Contacts (Smart search, create, update)
+2. Manage Interactions (Log new discussions, search history)
+3. Sales Pipeline (Create leads, deals)
+4. Operations (Create tasks)
+
+### SEARCH STRATEGY:
+- The CRM search is "smart" and handles full names (e.g., "Dave Vrbas").
+- If a specific search (like a full name) fails, try searching for just the FIRST name or the LAST name before concluding they don't exist.
+- If you find multiple matches, list them and ask for clarification.
+- ALWAYS search before creating a new contact to prevent duplicates.
+
+### BEHAVIOR:
+- Be concise and actionable.
+- When logging interactions, confirm the date (default: today) and summary.
+- If you are stuck, read AUDREY_ACCESS.md for technical requirements.
+- IF AN API ERROR OCCURS: Do not speculate about configuration or keys. Simply say "I'm having trouble connecting to the CRM right now." and offer to try again.`;
       
       const chat = ai.chats.create({
         model: "gemini-3-flash-preview",

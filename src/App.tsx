@@ -447,8 +447,16 @@ export default function App() {
                 placeholder="Search contacts by name, email, or tag..." 
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10 pr-4 py-2 text-sm bg-slate-100 border-transparent focus:bg-white focus:border-emerald-500 rounded-lg transition-all outline-none w-80"
+                className="pl-10 pr-10 py-2 text-sm bg-slate-100 border-transparent focus:bg-white focus:border-emerald-500 rounded-lg transition-all outline-none w-80 shadow-inner"
               />
+              {searchQuery && (
+                <button 
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 rounded-full hover:bg-slate-200 transition-colors"
+                >
+                  <X size={14} />
+                </button>
+              )}
             </div>
 
             {activeTab === 'contacts' && (
@@ -728,10 +736,50 @@ export default function App() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {contacts.length > 0 ? contacts.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((contact) => (
+                          {contacts.length === 0 && !loading ? (
+                            <tr>
+                              <td colSpan={9} className="px-6 py-20 text-center">
+                                <div className="flex flex-col items-center justify-center max-w-sm mx-auto">
+                                  <div className="p-4 bg-slate-100 text-slate-400 rounded-full mb-4">
+                                    <Search size={32} />
+                                  </div>
+                                  <h3 className="text-lg font-bold text-slate-900 mb-1">
+                                    {debouncedSearchQuery || tagFilter ? "No matches found" : "No contacts yet"}
+                                  </h3>
+                                  <p className="text-slate-500 text-sm mb-6">
+                                    {debouncedSearchQuery || tagFilter 
+                                      ? `We couldn't find anyone matching your current filters. Try broadening your search.`
+                                      : "Start building your network by adding your first contact record."}
+                                  </p>
+                                  <div className="flex gap-2">
+                                    {(debouncedSearchQuery || tagFilter) && (
+                                      <button 
+                                        onClick={() => {
+                                          setSearchQuery('');
+                                          setTagFilter('');
+                                        }}
+                                        className="px-4 py-2 text-sm font-semibold text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-all shadow-sm"
+                                      >
+                                        Clear search
+                                      </button>
+                                    )}
+                                    <button 
+                                      onClick={() => setShowContactModal(true)}
+                                      className="px-4 py-2 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-all shadow-sm"
+                                    >
+                                      Create contact
+                                    </button>
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          ) : contacts.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((contact) => (
                             <tr 
                               key={contact.id} 
-                              className="hover:bg-slate-50 transition-colors group cursor-pointer"
+                              className={cn(
+                                "hover:bg-slate-50 transition-colors group cursor-pointer",
+                                selectedContactId === contact.id && "bg-emerald-50"
+                              )}
                               onClick={() => contact.id && setSelectedContactId(contact.id)}
                             >
                               <td className="px-6 py-4">
@@ -805,13 +853,7 @@ export default function App() {
                                 </div>
                               </td>
                             </tr>
-                          )) : (
-                            <tr>
-                              <td colSpan={9} className="px-6 py-12 text-center text-slate-400 italic">
-                                No contacts found. Click "New Contact" to add one.
-                              </td>
-                            </tr>
-                          )}
+                          ))}
                         </tbody>
                       </table>
                     </div>

@@ -20,6 +20,7 @@ If you are an AI agent, the most reliable way to interact with the CRM is via th
 
 ### 1. Contacts (Finding People)
 - **Search:** `curl "[BASE_URL]/api/contacts?q=John%20Smith"`
+  - *Smart Search:* You can search by full name, first name, last name, email, or company. The system automatically matches "John Smith" even if "John" is in the first name field and "Smith" is in the last name field. 
   - *Note: Spaces MUST be percent-encoded as %20 in URLs.*
 - **Create:** `curl -X POST -H "Content-Type: application/json" -d '{"firstName":"John"}' "[BASE_URL]/api/contacts"`
 
