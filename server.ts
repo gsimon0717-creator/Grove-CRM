@@ -1,3 +1,4 @@
+import "dotenv/config";
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
@@ -74,11 +75,30 @@ async function startServer() {
   app.use(express.json());
 
   // API Routes
+  app.use((req, res, next) => {
+    console.log(`[CRM-REQUEST] ${req.method} ${req.url}`);
+    next();
+  });
+
   app.get("/api/health", (req, res) => {
     res.json({ 
       status: "ok", 
       mode: "local-sqlite",
-      hasAiKey: !!process.env.GEMINI_API_KEY
+      hasAiKey: !!process.env.GEMINI_API_KEY,
+      timestamp: new Date().toISOString()
+    });
+  });
+
+  app.get("/api/agent-info", (req, res) => {
+    res.json({
+      name: "Grove CRM Agent API",
+      baseURL: `http://localhost:${PORT}`,
+      endpoints: {
+        command: "/api/ai/command (POST { prompt: string })",
+        contacts: "/api/contacts (GET, POST)",
+        interactions: "/api/contacts/:id/interactions (GET, POST)"
+      },
+      instructions: "Always wrap URLs in quotes when using curl. For search queries with spaces, use percent encoding (e.g., 'Dave%20Vrbas'). Example: curl \"http://localhost:3000/api/contacts?q=Dave%20Vrbas\""
     });
   });
 
@@ -284,6 +304,39 @@ async function startServer() {
       }
     },
     {
+      name: "create_contact",
+      description: "Create a new contact in the CRM.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          firstName: { type: "STRING" },
+          lastName: { type: "STRING" },
+          email1: { type: "STRING" },
+          phone1: { type: "STRING" },
+          companyName: { type: "STRING" },
+          tag: { type: "STRING", description: "Comma-separated tags" },
+          otherInfo: { type: "STRING" }
+        },
+        required: ["firstName"]
+      }
+    },
+    {
+      name: "update_contact",
+      description: "Update an existing contact.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          id: { type: "STRING", description: "The contact ID" },
+          firstName: { type: "STRING" },
+          lastName: { type: "STRING" },
+          email1: { type: "STRING" },
+          tag: { type: "STRING" },
+          otherInfo: { type: "STRING" }
+        },
+        required: ["id"]
+      }
+    },
+    {
       name: "get_interactions",
       description: "Get interaction history for a contact.",
       parameters: {
@@ -317,6 +370,47 @@ async function startServer() {
         },
         required: ["contactId", "description"]
       }
+    },
+    {
+      name: "create_lead",
+      description: "Create a new lead.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          name: { type: "STRING" },
+          email: { type: "STRING" },
+          status: { type: "STRING", enum: ["new", "qualified", "unqualified", "closed"] },
+          value: { type: "NUMBER" }
+        },
+        required: ["name"]
+      }
+    },
+    {
+      name: "create_deal",
+      description: "Create a new deal.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          name: { type: "STRING" },
+          value: { type: "NUMBER" },
+          stage: { type: "STRING", enum: ["discovery", "proposal", "negotiation", "won", "lost"] },
+          expectedCloseDate: { type: "STRING" }
+        },
+        required: ["name", "value"]
+      }
+    },
+    {
+      name: "create_task",
+      description: "Create a new task.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          title: { type: "STRING" },
+          deadline: { type: "STRING" },
+          priority: { type: "STRING", enum: ["low", "medium", "high"] }
+        },
+        required: ["title"]
+      }
     }
   ];
 
@@ -333,6 +427,34 @@ async function startServer() {
         }
         
         return db.prepare(q).all(...params);
+      case 'create_contact': {
+        const id = Math.random().toString(36).substring(2, 15);
+        const createdAt = new Date().toISOString();
+        db.prepare(`
+          INSERT INTO contacts (id, firstName, lastName, email1, email2, phone1, phone2, companyName, jobDescription, tag, otherInfo, createdAt)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(id, args.firstName || '', args.lastName || '', args.email1 || '', '', args.phone1 || '', '', args.companyName || '', '', args.tag || '', args.otherInfo || '', createdAt);
+        return { success: true, id };
+      }
+      case 'update_contact': {
+        const { id, ...updates } = args;
+        const current = db.prepare("SELECT * FROM contacts WHERE id = ?").get(id) as any;
+        if (!current) return { error: "Contact not found" };
+        
+        db.prepare(`
+          UPDATE contacts SET 
+            firstName = ?, lastName = ?, email1 = ?, tag = ?, otherInfo = ?
+          WHERE id = ?
+        `).run(
+          updates.firstName ?? current.firstName,
+          updates.lastName ?? current.lastName,
+          updates.email1 ?? current.email1,
+          updates.tag ?? current.tag,
+          updates.otherInfo ?? current.otherInfo,
+          id
+        );
+        return { success: true };
+      }
       case 'get_interactions':
         return db.prepare("SELECT * FROM interactions WHERE contactId = ? ORDER BY date DESC").all(args.contactId);
       case 'search_interactions_globally':
@@ -348,6 +470,21 @@ async function startServer() {
         const date = args.date || new Date().toISOString().split('T')[0];
         db.prepare("INSERT INTO interactions (id, contactId, date, description) VALUES (?, ?, ?, ?)").run(id, args.contactId, date, args.description);
         return { success: true, id };
+      case 'create_lead': {
+        const lid = Math.random().toString(36).substring(2, 15);
+        db.prepare("INSERT INTO leads (id, name, email, status, value, createdAt) VALUES (?, ?, ?, ?, ?, ?)").run(lid, args.name, args.email || '', args.status || 'new', args.value || 0, new Date().toISOString());
+        return { success: true, id: lid };
+      }
+      case 'create_deal': {
+        const did = Math.random().toString(36).substring(2, 15);
+        db.prepare("INSERT INTO deals (id, name, value, stage, expectedCloseDate, createdAt) VALUES (?, ?, ?, ?, ?, ?)").run(did, args.name, args.value, args.stage || 'discovery', args.expectedCloseDate || '', new Date().toISOString());
+        return { success: true, id: did };
+      }
+      case 'create_task': {
+        const tid = Math.random().toString(36).substring(2, 15);
+        db.prepare("INSERT INTO tasks (id, title, deadline, status, priority, createdAt) VALUES (?, ?, ?, ?, ?, ?)").run(tid, args.title, args.deadline || '', 'pending', args.priority || 'medium', new Date().toISOString());
+        return { success: true, id: tid };
+      }
       default:
         return { error: "Unknown tool" };
     }
@@ -359,12 +496,10 @@ async function startServer() {
 
     try {
       const { GoogleGenAI } = await import("@google/genai");
-      const apiKey = process.env.GEMINI_API_KEY;
+      const apiKey = process.env.GEMINI_API_KEY || "";
       
-      // Initialize with the key if it exists, or empty string to allow platform fallback if applicable
-      // (Though the SDK requires a string).
-      const ai = new GoogleGenAI({ apiKey: apiKey || "" });
-      const systemInstruction = "You are a CRM agent API. Your goal is to execute tasks based on natural language commands. \n\n### CAPABILITIES:\n1. Find contacts (search_contacts)\n2. Fetch interaction history for a person (get_interactions)\n3. Global keyword search across all history (search_interactions_globally)\n4. Log NEW interactions (create_interaction)\n\n### BEHAVIOR:\n- If you need a contact ID, SEARCH for the person first.\n- If multiple people match, list them and stop to ask for clarification.\n- When logging interactions, confirm the date (default: today) and summary.\n- Be concise and actionable.";
+      const ai = new GoogleGenAI({ apiKey });
+      const systemInstruction = "You are a CRM agent API. Your goal is to execute tasks based on natural language commands. \n\n### CAPABILITIES:\n1. Manage Contacts (search, create, update)\n2. Manage Interactions (log new discussions, search history)\n3. Sales Pipeline (create leads, deals)\n4. Operations (create tasks)\n\n### BEHAVIOR:\n- If you need a contact ID, SEARCH for the person first.\n- If multiple people match, list them and stop to ask for clarification.\n- When logging interactions, confirm the date (default: today) and summary.\n- Be concise and actionable.\n- IF AN API ERROR OCCURS: Do not speculate about configuration or keys. Simply say \"I'm having trouble connecting to the CRM data service right now.\" and offer to try again later.";
       
       const chat = ai.chats.create({
         model: "gemini-3-flash-preview",
@@ -395,8 +530,10 @@ async function startServer() {
 
       res.json({ text: response.text });
     } catch (error: any) {
-      console.error("Agent API Error [ID: CRM-777]:", error);
-      res.status(500).json({ error: `[CRM-AI-ERROR] ${error.message}` });
+      console.error("Agent API Error [CRM-AI]:", error);
+      // provide a clean error to the agent to avoid leaking internals if not needed, 
+      // but the agent needs to know it failed.
+      res.status(500).json({ error: `Internal Server Error: ${error.message}` });
     }
   });
 
@@ -501,6 +638,7 @@ async function startServer() {
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Grove CRM Server running on http://localhost:${PORT} in LOCAL mode`);
+    console.log(`[CRM-INIT] AI Configuration status: ${process.env.GEMINI_API_KEY ? 'Platform Key Active' : 'Fallback Mode (Expecting platform injection)'}`);
   });
 }
 

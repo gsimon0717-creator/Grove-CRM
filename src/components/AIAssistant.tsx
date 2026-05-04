@@ -89,10 +89,82 @@ const searchInteractionsTool: FunctionDeclaration = {
   },
 };
 
+const createContactTool: FunctionDeclaration = {
+  name: "create_contact",
+  parameters: {
+    type: Type.OBJECT,
+    description: "Create a new contact in the CRM.",
+    properties: {
+      firstName: { type: Type.STRING },
+      lastName: { type: Type.STRING },
+      email1: { type: Type.STRING },
+      tag: { type: Type.STRING, description: "Comma-separated tags" },
+    },
+    required: ["firstName"],
+  },
+};
+
+const updateContactTool: FunctionDeclaration = {
+  name: "update_contact",
+  parameters: {
+    type: Type.OBJECT,
+    description: "Update an existing contact attribute.",
+    properties: {
+      id: { type: Type.STRING, description: "The contact ID" },
+      firstName: { type: Type.STRING },
+      lastName: { type: Type.STRING },
+      email1: { type: Type.STRING },
+      tag: { type: Type.STRING },
+    },
+    required: ["id"],
+  },
+};
+
+const createLeadTool: FunctionDeclaration = {
+  name: "create_lead",
+  parameters: {
+    type: Type.OBJECT,
+    description: "Create a new lead/prospect.",
+    properties: {
+      name: { type: Type.STRING },
+      email: { type: Type.STRING },
+      value: { type: Type.NUMBER },
+    },
+    required: ["name"],
+  },
+};
+
+const createDealTool: FunctionDeclaration = {
+  name: "create_deal",
+  parameters: {
+    type: Type.OBJECT,
+    description: "Create a new deal in the pipeline.",
+    properties: {
+      name: { type: Type.STRING },
+      value: { type: Type.NUMBER },
+      stage: { type: Type.STRING },
+    },
+    required: ["name", "value"],
+  },
+};
+
+const createTaskTool: FunctionDeclaration = {
+  name: "create_task",
+  parameters: {
+    type: Type.OBJECT,
+    description: "Create a new task.",
+    properties: {
+      title: { type: Type.STRING },
+      deadline: { type: Type.STRING },
+    },
+    required: ["title"],
+  },
+};
+
 export default function AIAssistant() {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
-    { role: 'assistant', content: 'Hi! I\'m your CRM assistant. I can help you find contacts, prepare bulk emails by tag, or look up interaction history. Just ask!' }
+    { role: 'assistant', content: 'Hi! I\'m your CRM assistant. I can help you find contacts, log interactions (emails/calls), manage leads, or create tasks. Just ask!' }
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -104,8 +176,19 @@ export default function AIAssistant() {
     }
   }, [messages]);
 
-  const systemInstruction = "You are a highly efficient CRM assistant. Your primary objective is to help the user manage their professional relationships through the CRM API.\n\n### CORE CAPABILITIES:\n1. **Find Contacts:** Use 'search_contacts' by name, email, or tag. ALWAYS verify you have the correct contact ID before logging interactions.\n2. **Manage Interactions:** \n   - To see history: use 'get_interactions' with a contactId.\n   - To log a NEW discussion: use 'create_interaction'. This is vital for keeping logs up to date. Date defaults to today if omitted.\n   - To find specific past discussions: use 'search_interactions_globally' to find keywords across all logs.\n3. **Insights:** Help users summarize what has been discussed recently with specific tags or people.\n\n### GUIDELINES:\n- When asked 'what was our last talk with John?', first SEARCH for John, then FETCH his interactions, then summarize.\n- If multiple contacts match a name, list them and ask for clarification.\n- For bulk email requests (e.g., 'get emails for all investors'), return a clean comma-separated list.\n- Be concise, professional, and technical where appropriate (e.g., referencing 'ID' or 'Interaction Log').";
-  const tools = [searchContactsTool, listTagsTool, getInteractionsTool, createInteractionTool, searchInteractionsTool];
+  const systemInstruction = "You are a highly efficient CRM assistant. Your primary objective is to help the user manage their professional relationships through the CRM API.\n\n### CORE CAPABILITIES:\n1. **Manage Contacts:** Find people (search_contacts), create new entries (create_contact), or update info (update_contact).\n2. **Manage Interactions:** Always log new interactions (create_interaction) after you talk to someone. This is vital. \n3. **Sales & Ops:** Create leads (create_lead), deals (create_deal), and tasks (create_task).\n\n### GUIDELINES:\n- ALWAYS search for a contact before attempting to log an interaction to get their ID.\n- If multiple contacts match, list them and ask which one.\n- Be concise and professional.";
+  const tools = [
+    searchContactsTool, 
+    listTagsTool, 
+    getInteractionsTool, 
+    createInteractionTool, 
+    searchInteractionsTool,
+    createContactTool,
+    updateContactTool,
+    createLeadTool,
+    createDealTool,
+    createTaskTool
+  ];
 
   const executeFunction = async (name: string, args: any) => {
     if (name === 'search_contacts') {
@@ -138,8 +221,48 @@ export default function AIAssistant() {
       });
       if (!res.ok) {
         const error = await res.json();
-        return { error: error.message || 'Failed to create interaction via API' };
+        return { error: error.message || 'Failed to create interaction' };
       }
+      return await res.json();
+    }
+    if (name === 'create_contact') {
+      const res = await fetch('/api/contacts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(args)
+      });
+      return await res.json();
+    }
+    if (name === 'update_contact') {
+      const res = await fetch(`/api/contacts/${args.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(args)
+      });
+      return await res.json();
+    }
+    if (name === 'create_lead') {
+      const res = await fetch('/api/leads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(args)
+      });
+      return await res.json();
+    }
+    if (name === 'create_deal') {
+      const res = await fetch('/api/deals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(args)
+      });
+      return await res.json();
+    }
+    if (name === 'create_task') {
+      const res = await fetch('/api/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(args)
+      });
       return await res.json();
     }
     return { error: 'Function not found' };
